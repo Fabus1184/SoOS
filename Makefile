@@ -1,25 +1,32 @@
-#CC = gcc
+TARGET = all
+
 CC = x86-i686-cross/bin/i686-linux-gcc
 LD = x86-i686-cross/bin/i686-linux-ld
 
-#CFLAGS = -g -m32 -nostdlib -nostdinc -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -Wall -Wextra -Werror
-CFLAGS = -ffreestanding -fno-pie
+SRCS = ${wildcard src/*.c}
+HEADS = ${wildcard include/*.h}
+OBJS = ${SRCS:.c=.o interrupt.o}
+
+CFLAGS = -ffreestanding -fno-pie -Iinclude -nostdlib -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -Wall -Wextra -Werror
 
 all: os-image.bin
 
 os-image.bin: boot.bin kernel.bin 
-	cat $^ > $@
+	cat boot.bin kernel.bin > os-image.bin
 
 boot.bin: boot.asm
 	nasm -f bin -o $@ $^
 
-kernel.bin: kernel_entry.o kernel.o
-	$(LD) -m elf_i386 -o $@ -Ttext 0x1000 $^ --oformat binary
+kernel.bin: kernel_entry.o kernel.o $(OBJS)
+	$(LD) --allow-multiple-definition -m elf_i386 -o $@ -Ttext 0x1000 $^ --oformat binary
 
-%.o: %.c ${HEADERS}
+.c.o:
 	${CC} ${CFLAGS} -c $< -o $@
 
-%.o: %.asm
+kernel_entry.o: kernel_entry.asm
+	nasm $< -f elf -o $@
+
+interrupt.o: interrupt.asm
 	nasm $< -f elf -o $@
 
 run: os-image.bin
