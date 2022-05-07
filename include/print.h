@@ -17,10 +17,10 @@ uint16_t get_cursor();
 
 void set_cursor(uint16_t cursor);
 
-void print_char(char c);
+void print_char(const char c);
 
-void print(char *c);
+void print(const char *c);
 
-void println(char *c);
+void println(const char *c);
 
 void clear_screen();

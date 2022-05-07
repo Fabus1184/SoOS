@@ -2,13 +2,13 @@
 #include "soos_string.h"
 #include "isr.h"
 
-void kmain()
+_Noreturn void kmain()
 {
 	isr_install();
+	irq_install();
 
-	asm volatile("int $1");
-gi
 	clear_screen();
+
 	println("Welcome to SoOS!");
 
 	for (uint16_t i = 0; i < COLS; i++) {
@@ -41,6 +41,10 @@ gi
 		print(itoa(fib(i), buf));
 		print(", ");
 	}
+
+	println("");
+
+	while (1) asm volatile("nop");
 
 	// This should never return
 	asm volatile("hlt");

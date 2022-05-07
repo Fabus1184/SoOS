@@ -24,21 +24,21 @@ void set_cursor(uint16_t cursor)
 	io_out((uint8_t) (cursor & 0xFF), SCREEN_DATA_ADDR);
 }
 
-void print_char(char c)
+void print_char(const char c)
 {
 	uint16_t cursor = get_cursor();
 	VIDEO_MEM[cursor] = (COLOR << 8) + c;
 	set_cursor(cursor + 1);
 }
 
-void print(char *c)
+void print(const char *c)
 {
 	for (uint16_t i = 0; c[i] != 0; i++) {
 		print_char(c[i]);
 	}
 }
 
-void println(char *c)
+void println(const char *c)
 {
 	print(c);
 	while (get_cursor() % COLS != 0) {

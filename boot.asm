@@ -185,7 +185,7 @@ KERNEL_OFFSET equ 0x1000
 WHITE_ON_BLACK equ 0x0f
 CODE_SEG equ gdt_code - gdt_start
 DATA_SEG equ gdt_data - gdt_start
-NUM_SECTORS equ 31
+NUM_SECTORS equ 50
 
 times 510 - ($-$$) db 0
 dw 0xaa55
