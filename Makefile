@@ -1,5 +1,9 @@
-CC = gcc
-CFLAGS = -g -m32 -nostdlib -nostdinc -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -Wall -Wextra -Werror
+#CC = gcc
+CC = x86-i686-cross/bin/i686-linux-gcc
+LD = x86-i686-cross/bin/i686-linux-ld
+
+#CFLAGS = -g -m32 -nostdlib -nostdinc -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -Wall -Wextra -Werror
+CFLAGS = -ffreestanding -fno-pie
 
 all: os-image.bin
 
@@ -10,7 +14,7 @@ boot.bin: boot.asm
 	nasm -f bin -o $@ $^
 
 kernel.bin: kernel_entry.o kernel.o
-	ld -m elf_i386 -o $@ -Ttext 0x1000 $^
+	$(LD) -m elf_i386 -o $@ -Ttext 0x1000 $^ --oformat binary
 
 %.o: %.c ${HEADERS}
 	${CC} ${CFLAGS} -c $< -o $@
