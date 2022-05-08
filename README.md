@@ -1,6 +1,8 @@
 # SoOS
 
-A x86 operating system from scratch
+x86 operating system from scratch
+
+![thumbnail](thumbnail.png)
 
 ## What it can do
 
