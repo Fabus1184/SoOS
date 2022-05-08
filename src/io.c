@@ -16,13 +16,3 @@ void io_out(uint8_t data, uint16_t addr)
 		"out %%al, %%dx" : : "a" (data), "d" (addr)
 		);
 }
-
-int32_t io_sys_clock()
-{
-	asm volatile (
-		"mov $0, %ax\n"
-		"int $0x1a"
-		);
-
-	return 0;
-}

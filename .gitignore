@@ -53,3 +53,4 @@ dkms.conf
 
 *.bin
 x86-i686-cross/
+.idea/

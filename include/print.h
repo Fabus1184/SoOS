@@ -2,8 +2,9 @@
 
 #include "io.h"
 #include "soos_string.h"
+#include "soos_mem.h"
 
-#define ROWS 60
+#define ROWS 25
 #define COLS 80
 
 #define SCREEN_CTRL_ADDR 0x3d4
@@ -17,7 +18,7 @@ uint16_t get_cursor();
 
 void set_cursor(uint16_t cursor);
 
-void print_char(const char c);
+void print_char(char c);
 
 void print(const char *c);
 

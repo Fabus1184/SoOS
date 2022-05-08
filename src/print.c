@@ -13,6 +13,12 @@ uint16_t get_cursor()
 	return offset;
 }
 
+void scroll()
+{
+	memcpy((uint8_t *) VIDEO_MEM + (COLS * 2), (uint8_t *) VIDEO_MEM, (COLS * ROWS * 2));
+	memset((uint8_t *) VIDEO_MEM + (COLS * (ROWS - 1) * 2), 0x0, COLS * 2);
+}
+
 void set_cursor(uint16_t cursor)
 {
 	// high byte
@@ -27,8 +33,34 @@ void set_cursor(uint16_t cursor)
 void print_char(const char c)
 {
 	uint16_t cursor = get_cursor();
-	VIDEO_MEM[cursor] = (COLOR << 8) + c;
-	set_cursor(cursor + 1);
+
+	switch (c) {
+		case '\n':
+			println("");
+			break;
+
+		case '\b':
+			set_cursor(cursor - 1);
+			print(" ");
+			set_cursor(cursor - 1);
+			break;
+
+		case '\t':
+			print("    ");
+			break;
+			
+		default:
+
+			if (cursor >= ROWS * COLS) {
+				scroll();
+				set_cursor(cursor - COLS);
+			}
+
+			cursor = get_cursor();
+			VIDEO_MEM[cursor] = (COLOR << 8) + c;
+			set_cursor(cursor + 1);
+			break;
+	}
 }
 
 void print(const char *c)
@@ -40,12 +72,14 @@ void print(const char *c)
 
 void println(const char *c)
 {
-	print(c);
-	while (get_cursor() % COLS != 0) {
-		set_cursor(get_cursor() + 1);
+	if (c[0] == 0) {
+		print(" ");
+	} else {
+		print(c);
 	}
-	if (strcmp(c, "") != 0) {
-		set_cursor(get_cursor() + COLS);
+
+	if (get_cursor() % COLS != 0) {
+		set_cursor(COLS + get_cursor() - (get_cursor() % COLS));
 	}
 }
 

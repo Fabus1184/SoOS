@@ -2,18 +2,29 @@
 #include "soos_string.h"
 #include "isr.h"
 
-_Noreturn void kmain()
+__attribute__((unused)) _Noreturn void kmain()
 {
 	isr_install();
 	irq_install();
 
 	clear_screen();
 
-	println("Welcome to SoOS!");
 
-	for (uint16_t i = 0; i < COLS; i++) {
-		print_char('-');
-	}
+	char welcome[] = "Welcome to SoOS!";
+
+	print("+");
+	for (uint16_t i = 2; i < COLS; i++) print("-");
+	println("+");
+
+	print("|");
+	for (uint16_t i = 1; i < (COLS - strlen(welcome)) / 2; i++) print(" ");
+	print(welcome);
+	for (uint16_t i = 1; i < (COLS - strlen(welcome)) / 2; i++) print(" ");
+	println("|");
+
+	print("+");
+	for (uint16_t i = 2; i < COLS; i++) print("-");
+	println("+");
 
 	println("");
 
@@ -26,6 +37,7 @@ _Noreturn void kmain()
 	}
 
 	println("");
+	println("");
 
 	println("Primes:");
 	for (uint32_t i = 2; i < 200; ++i) {
@@ -36,6 +48,8 @@ _Noreturn void kmain()
 	}
 
 	println("");
+	println("");
+
 	println("Fibonacci numbers:");
 	for (uint16_t i = 0; i < 20; ++i) {
 		print(itoa(fib(i), buf));
@@ -43,9 +57,11 @@ _Noreturn void kmain()
 	}
 
 	println("");
+	println("");
 
-	while (1) asm volatile("nop");
+	init_shell();
 
-	// This should never return
+	// this should never return
 	asm volatile("hlt");
+	while (1) asm volatile("nop");
 }

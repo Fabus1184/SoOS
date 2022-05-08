@@ -7,7 +7,7 @@ SRCS = ${wildcard src/*.c}
 HEADS = ${wildcard include/*.h}
 OBJS = ${SRCS:.c=.o interrupt.o}
 
-CFLAGS = -ffreestanding -fno-pie -Iinclude -nostdlib -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -Wall -Wextra -Werror
+CFLAGS = -ffreestanding -fno-pie -Iinclude -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -Wall -Wextra -Werror
 
 all: os-image.bin
 
@@ -30,7 +30,7 @@ interrupt.o: interrupt.asm
 	nasm $< -f elf -o $@
 
 run: os-image.bin
-	qemu-system-i386 -drive format=raw,file=os-image.bin -d guest_errors,int
+	qemu-system-i386 -drive format=raw,file=os-image.bin -d guest_errors,int -soundhw pcspk
 
 clean:
 	find . -name "*.bin" -delete
