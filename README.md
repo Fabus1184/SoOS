@@ -1,8 +1,8 @@
 # SoOS - x86 operating system from scratch
 
 <div>
-  <img src="thumbnail.png" width="51%">
-  <img src="thumbnail2.png" width="46%">
+  <img src="res/thumbnail.png" width="51%">
+  <img src="res/thumbnail2.png" width="46%">
 </div>
   
 ## What it can do
