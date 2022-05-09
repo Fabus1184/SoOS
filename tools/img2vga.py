@@ -1,6 +1,7 @@
 """
 Convert images to vga mode 13h representation
 """
+
 import sys
 from PIL import Image
 from math import sqrt
