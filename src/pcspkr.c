@@ -24,8 +24,9 @@ void nosound()
 	io_out(tmp, 0x61);
 }
 
-void beep()
+void beep(const char *args)
 {
+	(void)(args);
 	play_sound(1000);
 	wait(10);
 	nosound();

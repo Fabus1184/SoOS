@@ -1,6 +1,7 @@
 # SoOS - x86 operating system from scratch
 
 ![thumbnail](thumbnail.png)
+![thumbnail2](thumbnail2.png)
 
 ## What it can do
 
@@ -9,10 +10,10 @@
 - Very simple command line interpreter
 - Reading RTC time
 - Beeping with the internal pc speaker
+- VGA video mode
 
 ## Things I plan to add
 
-- VGA video mode
 - Generic drivers (video, audio, ATA)
 - Implement more useful commandline programs
 - Virtual 8086 mode for BIOS functions

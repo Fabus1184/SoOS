@@ -13,10 +13,24 @@ void init_shell()
 
 void interpret(const char *input)
 {
+	char input_wo_args[buf_size];
+	char args[buf_size];
+
+	for(uint16_t i = 0; i <= buf_size; i++) {
+		input_wo_args[i] = input[i];
+
+		if (input[i] == ' ') {
+			input_wo_args[i] = '\0';
+			memcpy(((uint8_t*) input) + i, (uint8_t*) args, buf_size - i);
+			break;
+		}
+	}
+
 	uint16_t i = 0;
 	for(; i < N_CMDS; i++) {
-		if (strcmp(input, commands[i].cmd)) {
-			((void(*)()) commands[i].func)();
+		if (strcmp(input_wo_args, commands[i].cmd)) {
+			((void(*)()) commands[i].func)(args);
+			println("");
 			return;
 		}
 	}

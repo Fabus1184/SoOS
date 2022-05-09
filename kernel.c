@@ -1,14 +1,15 @@
 #include "print.h"
 #include "soos_string.h"
 #include "isr.h"
+#include "vga.h"
 
 __attribute__((unused)) _Noreturn void kmain()
 {
+
 	isr_install();
 	irq_install();
 
 	clear_screen();
-
 
 	char welcome[] = "Welcome to SoOS!";
 

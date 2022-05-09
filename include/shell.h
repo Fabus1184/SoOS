@@ -8,7 +8,7 @@
 #include "timer.h"
 #include "commands.h"
 
-#define PROMPT "SooSHELL $>"
+#define PROMPT "$ SoOS CLI -> "
 #define CURSOR "_"
 
 void input(char c);

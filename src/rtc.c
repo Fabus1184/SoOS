@@ -35,6 +35,8 @@ struct DateTime get_rtc()
 
 	if (century_register != 0) {
 		century = get_RTC_register(century_register);
+	} else {
+		century = 0;
 	}
 
 	do {
@@ -57,7 +59,10 @@ struct DateTime get_rtc()
 
 		if (century_register != 0) {
 			century = get_RTC_register(century_register);
+		} else {
+			century = 0;
 		}
+		
 	} while (
 		(last_second != second)	|| (last_minute != minute) || (last_hour != hour) || (last_day != day) || (last_month != month)
 		|| (last_year != year) || (last_century != century)

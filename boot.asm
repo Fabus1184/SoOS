@@ -5,7 +5,7 @@ call print
 
 mov [BOOT_DRIVE], dl
 
-mov bp, 0x9000
+mov bp, STACK_ADDR
 mov sp, bp
 
 call load_kernel
@@ -165,12 +165,12 @@ print_pm_end:
 	ret
 
 BOOT_DRIVE: db 0
-VIDEO_MEM: dd 0x000b8000
+VIDEO_MEM: dd 0xb8000
 MSG_BOOT_INIT: db "Booting SoOS! ...", 13, 10, 0
 MSG_LOAD_KERNEL: db "Loading kernel from disk ...", 13, 10, 0
 MSG_LOAD_KERNEL_FIN: db "Loading kernel finished!", 13, 10, 0
 MSG_DISK_ERROR: db "Error: reading from disk failed!", 13, 10, 0
-MSG_SECTORS_ERROR: db "Error: couldn't read sll sectors!", 13, 10, 0
+MSG_SECTORS_ERROR: db "Error: couldn't read all sectors!", 13, 10, 0
 
 MSG_PROT_MODE: db "Entered 32-bit protected mode!"
 times (MSG_PROT_MODE + 80 - $) db 0x20
@@ -181,11 +181,12 @@ MSG_KERNEL_RET: db "Error: kernel returned!"
 ;times (MSG_KERNEL_RET + 80 - $) db 0x20
 ;db 0
 
-KERNEL_OFFSET equ 0x1000
-WHITE_ON_BLACK equ 0x0f
+KERNEL_OFFSET equ 0x7e00
+WHITE_ON_BLACK equ 0x01
 CODE_SEG equ gdt_code - gdt_start
 DATA_SEG equ gdt_data - gdt_start
-NUM_SECTORS equ 50
+NUM_SECTORS equ 128
+STACK_ADDR equ 0x70fff
 
 times 510 - ($-$$) db 0
 dw 0xaa55

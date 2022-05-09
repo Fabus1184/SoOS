@@ -28,7 +28,9 @@ void wait(uint16_t ms)
 {
 	(void)(ms);
 
-	while(1) {
+	uint32_t start = tick;
+
+	while(tick - start < ms) {
 		char buf[10];
 		println(itoa(tick, buf));
 	}

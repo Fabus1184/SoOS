@@ -69,6 +69,12 @@ static void keyboard_callback(registers_t *regs)
 	if (scancode <= 57) {
 		input(scancodes[scancode]);
 	}
+
+	for(uint16_t i = 0; i < n_callbacks; i++) {
+		if (callbacks[i].predicate(scancodes[scancode])) {
+			callbacks[i].func(scancodes[scancode]);
+		}
+	}
 }
 
 void init_keyboard()
@@ -76,6 +82,37 @@ void init_keyboard()
 	register_interrupt_handler(IRQ1, keyboard_callback);
 }
 
+bool return_false(const char c)
+{
+	(void)(c);
+	return false;
+}
+
+void nothing(const char c)
+{
+	(void)(c);
+}
+
+struct KeyboardCallback null_callback = {
+	return_false, nothing
+};
+
+void register_callback(struct KeyboardCallback kc)
+{
+	callbacks[n_callbacks++] = kc;	
+}
+
+// TODO: fix this huge botch
+
+void drop_callback(struct KeyboardCallback kc)
+{
+	for(uint16_t i = 0; i < n_callbacks; i++)
+	{
+		if(callbacks[i].predicate == kc.predicate && callbacks[i].func == kc.func) {
+			callbacks[i] = null_callback;
+		}
+	}
+}
 
 /* 'keuyp' event corresponds to the 'keydown' + 0x80
  * it may still be a scancode we haven't implemented yet, or

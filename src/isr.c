@@ -124,6 +124,7 @@ void isr_handler(registers_t *r)
 	print(" (");
 	print(exception_messages[r->int_no]);
 	println(")");
+	asm volatile("hlt");
 }
 
 void register_interrupt_handler(uint8_t n, isr_t handler)
