@@ -1,8 +1,10 @@
 # SoOS - x86 operating system from scratch
 
-![thumbnail](thumbnail.png)
-![thumbnail2](thumbnail2.png)
-
+<div>
+  <img src="thumbnail.png" width="49%">
+  <img src="thumbnail2.png" width="49%">
+</div>
+  
 ## What it can do
 
 - Full booting process from 16 bit real mode to 32 bit protected mode to kernel execution
