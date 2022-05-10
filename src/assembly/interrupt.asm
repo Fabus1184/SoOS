@@ -1,37 +1,61 @@
-; Defined in isr.c
+; ------------------------------
+; define ISRs (Interrupt Service Routines) & IRQs (Interrupt ReQuests)
+; provides a ISR & IRQ-Handler
+; ------------------------------
+
+; these are defined in isr.c
 [extern isr_handler]
 [extern irq_handler]
 
-; Common ISR code
+; ------------------------------
+; ISR handler
+; preserves all registers
+; pushes pointer to registers_t struct onto stack
+; ------------------------------
 isr_common_stub:
-    ; 1. Save CPU state
-	pusha ; Pushes edi,esi,ebp,esp,ebx,edx,ecx,eax
-	mov ax, ds ; Lower 16-bits of eax = ds.
-	push eax ; save the data segment descriptor
-	mov ax, 0x10  ; kernel data segment descriptor
+    ; push registers onto stack
+	pusha
+
+	mov ax, ds
+	push eax
+	mov ax, 0x10
 	mov ds, ax
 	mov es, ax
 	mov fs, ax
 	mov gs, ax
-	push esp ; registers_t *r
-    ; 2. Call C handler
-    cld ; C code following the sysV ABI requires DF to be clear on function entry
+
+	; registers_t *r parameter in isr_handler.c
+	push esp
+
+    ; sysV ABI requires df (direction flag) to be clear on function entry
+    cld
+
+    ; call C function
 	call isr_handler
 
-    ; 3. Restore state
+    ; restore registers from stack
 	pop eax
     pop eax
 	mov ds, ax
 	mov es, ax
 	mov fs, ax
 	mov gs, ax
-	popa
-	add esp, 8 ; Cleans up the pushed error code and pushed ISR number
-	iret ; pops 5 things at once: CS, EIP, EFLAGS, SS, and ESP
+    popa
 
-; Common IRQ code. Identical to ISR code except for the 'call'
-; and the 'pop ebx'
+	; cleans up the pushed error code and pushed ISR number
+	add esp, 8
+
+	; pops cs, eip, eflags, ss, and esp
+	iret
+; ------------------------------
+
+
+
+; ------------------------------
+; IRQ handler
+; ------------------------------
 irq_common_stub:
+    ; push registers onto stack
     pusha
     mov ax, ds
     push eax
@@ -40,76 +64,35 @@ irq_common_stub:
     mov es, ax
     mov fs, ax
     mov gs, ax
+
+    ; registers_t *r parameter in isr_handler.c
     push esp
+
+    ; sysV ABI requires df (direction flag) to be clear on function entry
     cld
-    call irq_handler ; Different than the ISR code
-    pop ebx  ; Different than the ISR code
+
+    ; call C function
+    call irq_handler
+    pop ebx
     pop ebx
     mov ds, bx
     mov es, bx
     mov fs, bx
     mov gs, bx
     popa
+
+    ; cleans up the pushed IRQ number
     add esp, 8
+
+    ; pops cs, eip, eflags, ss, and esp
     iret
 
-; We don't get information about which interrupt was caller
-; when the handler is run, so we will need to have a different handler
-; for every interrupt.
-; Furthermore, some interrupts push an error code onto the stack but others
-; don't, so we will push a dummy error code for those which don't, so that
-; we have a consistent stack for all of them.
+; ------------------------------
 
-; First make the ISRs global
-global isr0
-global isr1
-global isr2
-global isr3
-global isr4
-global isr5
-global isr6
-global isr7
-global isr8
-global isr9
-global isr10
-global isr11
-global isr12
-global isr13
-global isr14
-global isr15
-global isr16
-global isr17
-global isr18
-global isr19
-global isr20
-global isr21
-global isr22
-global isr23
-global isr24
-global isr25
-global isr26
-global isr27
-global isr28
-global isr29
-global isr30
-global isr31
 
-global irq0
-global irq1
-global irq2
-global irq3
-global irq4
-global irq5
-global irq6
-global irq7
-global irq8
-global irq9
-global irq10
-global irq11
-global irq12
-global irq13
-global irq14
-global irq15
+; isrN & irqN are accessed by isr.c
+global isr0, isr1, isr2, isr3, isr4, isr5, isr6, isr7, isr8, isr9, isr10, isr11, isr12, isr13, isr14, isr15, isr16, isr17, isr18, isr19, isr20, isr21, isr22, isr23, isr24, isr25, isr26, isr27, isr28, isr29, isr30, isr31
+global irq0, irq1, irq2, irq3, irq4, irq5, irq6, irq7, irq8, irq9, irq10, irq11, irq12, irq13, irq14, irq15
 
 ; 0: Divide By Zero Exception
 isr0:
@@ -297,82 +280,99 @@ isr31:
     push byte 31
     jmp isr_common_stub
 
-; IRQ handlers
+; ------------------------------
+
+; 0: system timer
 irq0:
     push byte 0
 	push byte 32
 	jmp irq_common_stub
 
+; 1: keyboard controller
 irq1:
     push byte 1
 	push byte 33
 	jmp irq_common_stub
 
+; 2: Internal
 irq2:
     push byte 2
 	push byte 34
 	jmp irq_common_stub
 
+; 3: Serial Port 1
 irq3:
     push byte 3
 	push byte 35
 	jmp irq_common_stub
 
+; 4: Serial Port 2
 irq4:
     push byte 4
 	push byte 36
 	jmp irq_common_stub
 
+; 5: Parallel Port 2 & 3 or Soundcard
 irq5:
     push byte 5
 	push byte 37
 	jmp irq_common_stub
 
+; 6: Floppy Disk
 irq6:
     push byte 6
 	push byte 38
 	jmp irq_common_stub
 
+; 7: Parallel Port 1, Printer or secondary Soundcard
 irq7:
     push byte 7
 	push byte 39
 	jmp irq_common_stub
 
+; 8: RTC
 irq8:
     push byte 8
 	push byte 40
 	jmp irq_common_stub
 
+; 9: on Intel ACPI, else anything
 irq9:
     push byte 9
 	push byte 41
 	jmp irq_common_stub
 
+; 10: Any PCI / SCSI / NIC
 irq10:
     push byte 10
 	push byte 42
 	jmp irq_common_stub
 
+; 11: Any PCI / SCSI / NIC
 irq11:
     push byte 11
 	push byte 43
 	jmp irq_common_stub
 
+; 12: PS2 Mouse, may be emulated by USB Mouse
 irq12:
     push byte 12
 	push byte 44
 	jmp irq_common_stub
 
+; 13: FPU
 irq13:
     push byte 13
 	push byte 45
 	jmp irq_common_stub
 
+; 14: Primary ATA
 irq14:
     push byte 14
 	push byte 46
 	jmp irq_common_stub
 
+; 15: Secondary ATA
 irq15:
     push byte 15
 	push byte 47
