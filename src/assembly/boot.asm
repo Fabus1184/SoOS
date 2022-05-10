@@ -12,8 +12,6 @@ call load_kernel
 
 call switch_pm
 
-jmp $
-
 print:
 	pusha
 	mov ah, 0x0e
@@ -73,13 +71,13 @@ disk_error:
 	mov bx, MSG_DISK_ERROR
 	call print
 
-	jmp $
+	hlt
 
 sectors_error:
 	mov bx, MSG_SECTORS_ERROR
 	call print
 
-	jmp $
+	hlt
 
 switch_pm:
 	cli
@@ -139,7 +137,7 @@ BEGIN_PM:
 	mov ebx, MSG_KERNEL_RET
 	call print_pm
 
-	jmp $
+	hlt
 
 print_pm:
 	pusha
