@@ -2,11 +2,11 @@
 
 #include <inttypes.h>
 
-#include "print.h"
-#include "rtc.h"
-#include "soos_mem.h"
-#include "pcspkr.h"
-#include "vga.h"
+#include "print.hpp"
+#include "rtc.hpp"
+#include "soos_mem.hpp"
+#include "pcspkr.hpp"
+#include "vga.hpp"
 
 #define N_CMDS 6
 

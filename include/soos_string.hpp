@@ -1,7 +1,7 @@
 #pragma once
 
-#include "soos_math.h"
-#include "soos_mem.h"
+#include "soos_math.hpp"
+#include "soos_mem.hpp"
 
 #include <stdint.h>
 

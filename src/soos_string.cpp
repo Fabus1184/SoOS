@@ -1,9 +1,10 @@
-#include "soos_string.h"
+#include "soos_string.hpp"
 
 char *itoa(uint32_t n, char *buf)
 {
 	if (n == 0) {
-		buf = "0";
+		buf[0] = '0';
+		buf[1] = 0;
 		return buf;
 	}
 	uint16_t i = 0;
@@ -39,7 +40,7 @@ bool strcmp(const char *s1, const char *s2)
 uint32_t strlen(const char *str)
 {
 	uint32_t i = 0;
-	while(str[i] != 0) i++;
+	while (str[i] != 0) i++;
 	return i;
 }
 
@@ -48,8 +49,8 @@ char *pad(uint16_t padding, char filler, char *buf)
 	uint16_t len = strlen(buf);
 
 	if (len < padding) {
-		memcpy((uint8_t*) buf, (uint8_t*) buf + (padding - len), len);
-		memset((uint8_t*) buf, filler, padding - len);
+		memcpy((uint8_t *) buf, (uint8_t *) buf + (padding - len), len);
+		memset((uint8_t *) buf, filler, padding - len);
 	}
 
 	return buf;

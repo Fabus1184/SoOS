@@ -2,11 +2,11 @@
 
 #include <inttypes.h>
 
-#include "soos_string.h"
-#include "soos_mem.h"
-#include "print.h"
-#include "timer.h"
-#include "commands.h"
+#include "soos_string.hpp"
+#include "soos_mem.hpp"
+#include "print.hpp"
+#include "timer.hpp"
+#include "commands.hpp"
 
 #define PROMPT "$ SoOS CLI -> "
 #define CURSOR "_"

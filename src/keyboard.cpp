@@ -1,4 +1,4 @@
-#include "keyboard.h"
+#include "keyboard.hpp"
 
 static const char scancodes[] = {
 	'\0',

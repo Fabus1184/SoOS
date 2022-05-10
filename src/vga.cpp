@@ -1,4 +1,4 @@
-#include "vga.h"
+#include "vga.hpp"
 
 regs16_t regs;
 

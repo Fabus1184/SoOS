@@ -1,8 +1,8 @@
 #pragma once
 
-#include "io.h"
-#include "soos_string.h"
-#include "soos_mem.h"
+#include "io.hpp"
+#include "soos_string.hpp"
+#include "soos_mem.hpp"
 
 #define ROWS 25
 #define COLS 80

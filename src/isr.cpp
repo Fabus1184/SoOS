@@ -1,5 +1,4 @@
-#include "isr.h"
-#include "../include/isr.h"
+#include "isr.hpp"
 
 void isr_install()
 {
@@ -77,7 +76,7 @@ void irq_install()
 }
 
 /* To print the message which defines every exception */
-char *exception_messages[] = {
+char exception_messages[][30] = {
 	"Division By Zero",
 	"Debug",
 	"Non Maskable Interrupt",

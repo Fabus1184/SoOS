@@ -1,4 +1,4 @@
-#include "idt.h"
+#include "idt.hpp"
 
 void set_idt_gate(uint32_t n, uint32_t handler)
 {

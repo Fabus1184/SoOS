@@ -2,10 +2,10 @@
 
 #include <inttypes.h>
 
-#include "io.h"
-#include "isr.h"
-#include "print.h"
-#include "shell.h"
+#include "io.hpp"
+#include "isr.hpp"
+#include "print.hpp"
+#include "shell.hpp"
 
 #define MAX_KCBS 255
 

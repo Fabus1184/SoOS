@@ -1,4 +1,4 @@
-#include "soos_mem.h"
+#include "soos_mem.hpp"
 
 uint32_t mem_ptr = 0x10000;
 

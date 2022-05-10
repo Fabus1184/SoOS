@@ -2,9 +2,9 @@
 
 #include <inttypes.h>
 
-#include "soos_mem.h"
-#include "shell.h"
-#include "isr.h"
+#include "soos_mem.hpp"
+#include "shell.hpp"
+#include "isr.hpp"
 
 #define VGA_WIDTH 320
 #define VGA_HEIGHT 200
@@ -15,7 +15,7 @@ typedef struct __attribute__ ((packed)) {
 	uint16_t gs, fs, es, ds, eflags;
 } regs16_t;
 
-extern void int32(uint8_t intnum, regs16_t *regs);
+extern "C" void int32(uint8_t intnum, regs16_t *regs);
 
 void switch_tm();
 

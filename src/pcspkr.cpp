@@ -1,4 +1,4 @@
-#include "pcspkr.h"
+#include "pcspkr.hpp"
 
 void play_sound(uint32_t freq)
 {

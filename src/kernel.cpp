@@ -1,11 +1,9 @@
-#include "print.h"
-#include "soos_string.h"
-#include "isr.h"
-#include "vga.h"
+#include "print.hpp"
+#include "soos_string.hpp"
+#include "isr.hpp"
 
-__attribute__((unused)) _Noreturn void kmain()
+extern "C" __attribute__((unused, noreturn)) void kmain()
 {
-
 	isr_install();
 	irq_install();
 
@@ -18,9 +16,9 @@ __attribute__((unused)) _Noreturn void kmain()
 	println("+");
 
 	print("|");
-	for (uint16_t i = 1; i < (COLS - strlen(welcome)) / 2; i++) print(" ");
+	for (uint16_t i = 1; i < (uint16_t) (COLS - strlen(welcome)) / 2; i++) print(" ");
 	print(welcome);
-	for (uint16_t i = 1; i < (COLS - strlen(welcome)) / 2; i++) print(" ");
+	for (uint16_t i = 1; i < (uint16_t) (COLS - strlen(welcome)) / 2; i++) print(" ");
 	println("|");
 
 	print("+");
@@ -64,5 +62,5 @@ __attribute__((unused)) _Noreturn void kmain()
 
 	// this should never return
 	asm volatile("hlt");
-	while (1) asm volatile("nop");
+	while (true) asm volatile("nop");
 }

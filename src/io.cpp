@@ -1,4 +1,4 @@
-#include "io.h"
+#include "io.hpp"
 
 uint8_t io_in(uint16_t addr)
 {

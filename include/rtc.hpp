@@ -2,7 +2,7 @@
 
 #include <inttypes.h>
 
-#include "io.h"
+#include "io.hpp"
 
 #define CURRENT_YEAR 2022
 #define CMOS_ADDRESS 0x70

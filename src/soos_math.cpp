@@ -1,4 +1,4 @@
-#include "soos_math.h"
+#include "soos_math.hpp"
 
 uint32_t pow(uint32_t a, uint32_t b)
 {

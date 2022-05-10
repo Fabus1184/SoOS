@@ -1,4 +1,4 @@
-#include "rtc.h"
+#include "rtc.hpp"
 
 uint32_t get_update_in_progress_flag()
 {

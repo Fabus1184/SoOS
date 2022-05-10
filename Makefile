@@ -1,13 +1,13 @@
 TARGET = all
 
 CC = x86-i686-cross/bin/i686-linux-gcc
-LD = x86-i686-cross/bin/i686-linux-ld
+LD = x86-i686-cross/bin/i686-linux-gcc
 
-SRCS = ${wildcard src/*.c printf/*.c}
-HEADS = ${wildcard include/*.h printf/*.h}
-OBJS = ${SRCS:.c=.o assembly/interrupt.o assembly/vga.o}
+SRCS = ${wildcard src/*.cpp}
+HEADS = ${wildcard include/*.hpp}
+OBJS = ${SRCS:src/%.cpp=build/%.o build/interrupt.o build/int32.o}
 
-CFLAGS = -Os -ffreestanding -fno-pie -Iinclude -nostdlib -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -Wall -Wextra -Werror
+CFLAGS := -Os -ffreestanding -fno-exceptions -fno-rtti -fno-pie -Iinclude -nostdlib -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -Wall -Wextra -Werror
 
 all: os-image.bin
 	find . -name "*.o" -delete
@@ -19,13 +19,13 @@ os-image.bin: boot.bin kernel.bin
 boot.bin: assembly/boot.asm
 	nasm -f bin -o $@ $^
 
-kernel.bin: assembly/kernel_entry.o src/kernel.o $(OBJS)
-	$(LD) --allow-multiple-definition -m elf_i386 -o $@ -Ttext 0x7e00 $^ --oformat binary
+kernel.bin: build/kernel_entry.o build/kernel.o $(OBJS)
+	$(LD) -Wl,--allow-multiple-definition -Wl,-Ttext=0x7e00 -Wl,--oformat=binary $^ $(CFLAGS) -o $@ -lgcc
 
-.c.o:
-	${CC} ${CFLAGS} -c $< -o $@
+build/%.o: src/%.cpp
+	$(CC) $(CFLAGS) -c $< -o $@
 
-assembly/%.o: assembly/%.asm
+build/%.o: assembly/%.asm
 	nasm $< -f elf -o $@
 
 run: os-image.bin

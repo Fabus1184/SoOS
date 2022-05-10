@@ -2,7 +2,7 @@
 
 #include <inttypes.h>
 
-#include "io.h"
-#include "timer.h"
+#include "io.hpp"
+#include "timer.hpp"
 
 void play_sound(uint32_t freq);
