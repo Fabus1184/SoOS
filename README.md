@@ -36,4 +36,11 @@
 
 Black magic and a pact with the devil i guess
 
-> I use a x86-i686 cross-compile toolchain from [bootlin.com](https://toolchains.bootlin.com/downloads/releases/toolchains/x86-i686/tarballs/x86-i686--glibc--stable-2021.11-1.tar.bz2)
+## Documentation
+
+The documentation is automatically generated with Doxygen and accessible via GitHub Pages [here](https://fabus1184.github.io/SoOS/html/index.html)
+
+## Building from source
+
+- building will require a x86-i686 cross-compiler 
+- I use a x86-i686 cross-compile toolchain from [bootlin.com](https://toolchains.bootlin.com/downloads/releases/toolchains/x86-i686/tarballs/x86-i686--glibc--stable-2021.11-1.tar.bz2)
