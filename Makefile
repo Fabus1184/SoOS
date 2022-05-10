@@ -30,8 +30,8 @@ build/%.o: src/%.cpp
 build/%.o: src/%.asm
 	nasm $< -f elf -o $@
 
-run: os-image.bin
-	qemu-system-i386 -drive format=raw,file=os-image.bin -d guest_errors -soundhw pcspk
+run: all
+	./run.sh
 
 clean:
 	find . -name "*.bin" -delete
