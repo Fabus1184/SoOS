@@ -1,0 +1,39 @@
+# This is a basic workflow to help you get started with Actions
+
+name: doxygen
+
+# Controls when the workflow will run
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+
+      - name: install doxygen
+        run: sudo apt install doxygen
+        
+      - name: generate docs
+        run: cd docs && doxygen
+        
+      - name: add changes
+        run: git add .
+      
+      - name: commit files
+        run: |
+          git config --local user.email "github-actions-bot@users.noreply.github.com"
+          git config --local user.name "github-actions [bot]"
+          git commit -m "auto-generated doxygen"
+          
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.DOXYGEN_TOKEN }}
+          branch: ${{ github.ref }}
