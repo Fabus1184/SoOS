@@ -1,4 +1,6 @@
-# SoOS - x86 operating system from scratch
+<h1 align="center">SoOS - x86 operating system from scratch</h1>
+
+[![doxygen](https://github.com/Fabus1184/SoOS/actions/workflows/Doxygen.yml/badge.svg)](https://github.com/Fabus1184/SoOS/actions/workflows/Doxygen.yml)
 
 <div>
   <img src="res/thumbnail.png" width="51%">
