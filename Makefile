@@ -16,7 +16,7 @@ all: os-image.bin
 os-image.bin: boot.bin kernel.bin 
 	cat boot.bin kernel.bin > os-image.bin
 
-boot.bin: assembly/boot.nasm
+boot.bin: assembly/boot.asm
 	nasm -f bin -o $@ $^
 
 kernel.bin: build/kernel_entry.o build/kernel.o $(OBJS)
@@ -25,7 +25,7 @@ kernel.bin: build/kernel_entry.o build/kernel.o $(OBJS)
 build/%.o: src/%.cpp
 	$(CC) $(CFLAGS) -c $< -o $@
 
-build/%.o: assembly/%.nasm
+build/%.o: assembly/%.asm
 	nasm $< -f elf -o $@
 
 run: os-image.bin
