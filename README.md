@@ -34,4 +34,4 @@
 
 Black magic and a pact with the devil i guess
 
-> Uses x86-i686 cross-compile toolchain from [bootlin.com](https://toolchains.bootlin.com/downloads/releases/toolchains/x86-i686/tarballs/x86-i686--glibc--stable-2021.11-1.tar.bz2)
+> I use a x86-i686 cross-compile toolchain from [bootlin.com](https://toolchains.bootlin.com/downloads/releases/toolchains/x86-i686/tarballs/x86-i686--glibc--stable-2021.11-1.tar.bz2)
