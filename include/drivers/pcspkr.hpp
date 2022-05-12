@@ -1,8 +1,10 @@
 #pragma once
 
-#include <inttypes.h>
+#include <cinttypes>
 
 #include "io.hpp"
 #include "timer.hpp"
 
-void play_sound(uint32_t freq);
+void nosound();
+
+void beep(int16_t frequency, int16_t ms_duration);

@@ -1,124 +1,52 @@
 #include "keyboard.hpp"
 
-static const char scancodes[] = {
-	'\0',
-	'\0',
-	 '1',
-	 '2',
-	 '3',
-	 '4',
-	 '5',
-	 '6',
-	 '7',
-	 '8',
-	 '9',
-	 '0',
-	 '?',
-	 '`',
-	'\b',
-	'\t',
-	 'q',
-	 'w',
-	 'e',
-	 'r',
-	 't',
-	 'z',
-	 'u',
-	 'i',
-	 'o',
-	 'p',
-	 'u',
-	 '+',
-	'\n',
-	'\0',
-	 'a',
-	 's',
-	 'd',
-	 'f',
-	 'g',
-	 'h',
-	 'j',
-	 'k',
-	 'l',
-	 'o',
-	 'a',
-	'\\',
-	'\0',
-	 '#',
-	 'y',
-	 'x',
-	 'c',
-	 'v',
-	 'b',
-	 'n',
-	 'm',
-	 ',',
-	 '.',
-	 '-',
-	'\0',
-	'\0',
-	'\0',
-	 ' '
+char last_keys[N_LAST_KEYS];
+char *last_keys_ptr;
+
+/**
+ * @attention german keyboard layout
+ * @todo implement different keyboard layouts
+ */
+static const char SCANCODES[] = {
+	'\0', '\0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '?', '`', '\b', '\t', 'q', 'w',
+	'e', 'r', 't', 'z', 'u', 'i', 'o', 'p', 'u', '+', '\n', '\0', 'a', 's', 'd', 'f', 'g',
+	'h', 'j', 'k', 'l', 'o', 'a', '\\', '\0', '#', 'y', 'x', 'c', 'v', 'b', 'n', 'm', ',',
+	'.', '-', '\0', '\0', '\0', ' '
 };
 
+/**
+ * @param regs unused
+ * @attention this is called by an interrupt
+ * @todo handle modifier keys
+ */
 static void keyboard_callback(registers_t *regs)
 {
 	(void) (regs);
-	uint8_t scancode = io_in(0x60);
+	uint8_t key = io_in(0x60);
 
-	if (scancode <= 57) {
-		input(scancodes[scancode]);
+	if (key <= 57) {
+		*(++last_keys_ptr) = SCANCODES[key];
 	}
 
-	for(uint16_t i = 0; i < n_callbacks; i++) {
-		if (callbacks[i].predicate(scancodes[scancode])) {
-			callbacks[i].func(scancodes[scancode]);
-		}
+	if (last_keys_ptr == last_keys + N_LAST_KEYS) {
+		last_keys_ptr = last_keys;
 	}
 }
 
+/**
+ * @brief initializes the keyboard IRQ
+ */
 void init_keyboard()
 {
 	register_interrupt_handler(IRQ1, keyboard_callback);
+	last_keys_ptr = last_keys;
 }
 
-bool return_false(const char c)
+char get_char()
 {
-	(void)(c);
-	return false;
-}
-
-void nothing(const char c)
-{
-	(void)(c);
-}
-
-struct KeyboardCallback null_callback = {
-	return_false, nothing
-};
-
-void register_callback(struct KeyboardCallback kc)
-{
-	callbacks[n_callbacks++] = kc;	
-}
-
-// TODO: fix this huge botch
-
-void drop_callback(struct KeyboardCallback kc)
-{
-	for(uint16_t i = 0; i < n_callbacks; i++)
-	{
-		if(callbacks[i].predicate == kc.predicate && callbacks[i].func == kc.func) {
-			callbacks[i] = null_callback;
-		}
+	while (last_keys_ptr == last_keys) {
+		asm volatile("nop");
 	}
-}
 
-/* 'keuyp' event corresponds to the 'keydown' + 0x80
- * it may still be a scancode we haven't implemented yet, or
- * maybe a control/escape sequence */
-/*if (scancode <= 0x7f) {
-	return ('Unknown key down');
-} else if (scancode <= 0x39 + 0x80) {
-	return ('key up ');
-} else return ('Unknown key up');*/
+	return *(last_keys_ptr--);
+}

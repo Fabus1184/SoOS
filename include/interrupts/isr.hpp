@@ -1,8 +1,7 @@
 #pragma once
 
-#include <stdint.h>
+#include <cstdint>
 
-#include "print.hpp"
 #include "idt.hpp"
 #include "keyboard.hpp"
 #include "timer.hpp"

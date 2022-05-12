@@ -4,11 +4,11 @@
 #include "soos_string.hpp"
 #include "soos_mem.hpp"
 
-#define ROWS 25
-#define COLS 80
+#define TEXT_ROWS 25
+#define TEXT_COLS 80
 
-#define SCREEN_CTRL_ADDR 0x3d4
-#define SCREEN_DATA_ADDR 0x3d5
+#define SCREEN_CTRL_ADDRESS 0x3d4
+#define SCREEN_DATA_ADDRESS 0x3d5
 
 #define COLOR 0x0a
 

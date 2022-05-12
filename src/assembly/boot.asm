@@ -110,13 +110,11 @@ disk_load:
 disk_error:
 	mov bx, MSG_DISK_ERROR
 	call print
-
 	hlt
 
 sectors_error:
 	mov bx, MSG_SECTORS_ERROR
 	call print
-
 	hlt
 
 ; ------------------------------
@@ -310,16 +308,16 @@ MSG_KERNEL_RET:         db "Error: kernel returned!", 0
 CODE_SEG        equ gdt_code - gdt_start
 DATA_SEG        equ gdt_data - gdt_start
 
-; has to be same as when linking in Makefile
+; has to be same as when linking
 KERNEL_OFFSET   equ 0x7e00
 WHITE_ON_BLACK  equ 0x01
 
 ; this must be adjusted to the size of the kernel, each sector MAY OR MAY NOT BE 512 Bytes in size
-NUM_SECTORS     equ 71
+NUM_SECTORS     equ 127
 
 ; this may have to be adjusted to accommodate detected RAM and / or special memory mappings
-STACK_ADDR      equ 0x3000
-STACK32_ADDR    equ 0x90000
+STACK_ADDR      equ 0x1000
+STACK32_ADDR    equ 0x00400000
 
 ; ------------------------------
 

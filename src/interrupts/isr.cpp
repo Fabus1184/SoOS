@@ -136,7 +136,7 @@ void irq_handler(registers_t *r)
 	if (r->int_no >= 40) io_out(0x20, 0xA0);
 	io_out(0x20, 0x20);
 
-	if (interrupt_handlers[r->int_no] != 0) {
+	if (interrupt_handlers[r->int_no] != nullptr) {
 		isr_t handler = interrupt_handlers[r->int_no];
 		handler(r);
 	}

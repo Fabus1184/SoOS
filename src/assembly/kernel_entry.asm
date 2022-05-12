@@ -4,8 +4,7 @@
 ; ------------------------------
 [bits 32]
 
-; linker will know where kmain is
-; implemented in kernel.c
+; linker will know where kmain is, implemented in kernel.c
 [extern kmain]
 
 ; declare global for gcc to find

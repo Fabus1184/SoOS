@@ -1,11 +1,18 @@
 #include "pcspkr.hpp"
 
-void play_sound(uint32_t freq)
+void nosound()
 {
+	uint8_t tmp = io_in(0x61) & 0xFC;
+	io_out(tmp, 0x61);
+}
+
+void play_sound(uint32_t frequency)
+{
+	nosound();
 	uint32_t div;
 	uint8_t tmp;
 
-	div = 1193180 / freq;
+	div = 1193180 / frequency;
 
 	io_out(0xb6, 0x43);
 	io_out((uint8_t) div, 0x42);
@@ -18,16 +25,9 @@ void play_sound(uint32_t freq)
 	}
 }
 
-void nosound()
+void beep(const int16_t frequency, const int16_t ms_duration)
 {
-	uint8_t tmp = io_in(0x61) & 0xFC;
-	io_out(tmp, 0x61);
-}
-
-void beep(const char *args)
-{
-	(void)(args);
-	play_sound(1000);
-	wait(10);
+	play_sound(frequency);
+	wait(ms_duration);
 	nosound();
 }

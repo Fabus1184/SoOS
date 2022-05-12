@@ -3,31 +3,31 @@
 uint16_t get_cursor()
 {
 	// high byte
-	io_out(14, SCREEN_CTRL_ADDR);
-	uint16_t offset = io_in(SCREEN_DATA_ADDR) << 8;
+	io_out(14, SCREEN_CTRL_ADDRESS);
+	uint16_t offset = io_in(SCREEN_DATA_ADDRESS) << 8;
 
 	// low byte
-	io_out(15, SCREEN_CTRL_ADDR);
-	offset += io_in(SCREEN_DATA_ADDR);
+	io_out(15, SCREEN_CTRL_ADDRESS);
+	offset += io_in(SCREEN_DATA_ADDRESS);
 
 	return offset;
 }
 
 void scroll()
 {
-	memcpy((uint8_t *) VIDEO_MEM + (COLS * 2), (uint8_t *) VIDEO_MEM, (COLS * ROWS * 2));
-	memset((uint8_t *) VIDEO_MEM + (COLS * (ROWS - 1) * 2), 0x0, COLS * 2);
+	memcpy((uint8_t *) VIDEO_MEM + (TEXT_COLS * 2), (uint8_t *) VIDEO_MEM, (TEXT_COLS * TEXT_ROWS * 2));
+	memset((uint8_t *) VIDEO_MEM + (TEXT_COLS * (TEXT_ROWS - 1) * 2), 0x0, TEXT_COLS * 2);
 }
 
 void set_cursor(uint16_t cursor)
 {
 	// high byte
-	io_out(14, SCREEN_CTRL_ADDR);
-	io_out((uint8_t) (cursor >> 8), SCREEN_DATA_ADDR);
+	io_out(14, SCREEN_CTRL_ADDRESS);
+	io_out((uint8_t) (cursor >> 8), SCREEN_DATA_ADDRESS);
 
 	// low byte
-	io_out(15, SCREEN_CTRL_ADDR);
-	io_out((uint8_t) (cursor & 0xFF), SCREEN_DATA_ADDR);
+	io_out(15, SCREEN_CTRL_ADDRESS);
+	io_out((uint8_t) (cursor & 0xFF), SCREEN_DATA_ADDRESS);
 }
 
 void print_char(const char c)
@@ -51,9 +51,9 @@ void print_char(const char c)
 			
 		default:
 
-			if (cursor >= ROWS * COLS) {
+			if (cursor >= TEXT_ROWS * TEXT_COLS) {
 				scroll();
-				set_cursor(cursor - COLS);
+				set_cursor(cursor - TEXT_COLS);
 			}
 
 			cursor = get_cursor();
@@ -78,14 +78,14 @@ void println(const char *c)
 		print(c);
 	}
 
-	if (get_cursor() % COLS != 0) {
-		set_cursor(COLS + get_cursor() - (get_cursor() % COLS));
+	if (get_cursor() % TEXT_COLS != 0) {
+		set_cursor(TEXT_COLS + get_cursor() - (get_cursor() % TEXT_COLS));
 	}
 }
 
 void clear_screen()
 {
-	uint32_t size = COLS * ROWS;
+	uint32_t size = TEXT_COLS * TEXT_ROWS;
 	for (uint32_t i = 0; i < size; i++) {
 		VIDEO_MEM[i] = 0x000a;
 	}

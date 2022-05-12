@@ -1,21 +1,15 @@
 #pragma once
 
-#include <inttypes.h>
+#include <cinttypes>
 #include "io.hpp"
 #include "isr.hpp"
 #include "print.hpp"
 #include "shell.hpp"
 
-struct TimerCallback {
-	uint16_t modulus;
-	void (*func) (const uint32_t timer);
-} timer_callbacks[255];
+[[maybe_unused]] static uint32_t tick;
+[[maybe_unused]] static uint32_t freq;
 
-void init_timer(uint32_t f);
-
-void register_timer_callback(struct TimerCallback tc);
-
-uint32_t get_timer();
+void init_timer(uint32_t freq);
 
 void wait(uint16_t ms);
 

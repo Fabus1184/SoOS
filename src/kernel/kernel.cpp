@@ -2,6 +2,26 @@
 #include "soos_string.hpp"
 #include "isr.hpp"
 
+static char welcome[17][TEXT_COLS + 1] = {
+	R"(+------------------------------------------------------------------------------+)",
+	R"(|                _    _      _                            _                    |)",
+	R"(|               | |  | |    | |                          | |                   |)",
+	R"(|               | |  | | ___| | ___ ___  _ __ ___   ___  | |_ ___              |)",
+	R"(|               | |/\| |/ _ \ |/ __/ _ \| '_ ` _ \ / _ \ | __/ _ \             |)",
+	R"(|               \  /\  /  __/ | (_| (_) | | | | | |  __/ | || (_) |            |)",
+	R"(|                \/  \/ \___|_|\___\___/|_| |_| |_|\___|  \__\___/             |)",
+	R"(|                                                                              |)",
+	R"(|                                                                              |)",
+	R"(|                          _____       _____ _____                             |)",
+	R"(|                         /  ___|     |  _  /  ___|                            |)",
+	R"(|                         \ `--.  ___ | | | \ `--.                             |)",
+	R"(|                          `--. \/ _ \| | | |`--. \                            |)",
+	R"(|                         /\__/ / (_) \ \_/ /\__/ /                            |)",
+	R"(|                         \____/ \___/ \___/\____/                             |)",
+	R"(|                                                                              |)",
+	R"(+------------------------------------------------------------------------------+)"
+};
+
 extern "C" __attribute__((unused, noreturn)) void kmain()
 {
 	isr_install();
@@ -9,53 +29,7 @@ extern "C" __attribute__((unused, noreturn)) void kmain()
 
 	clear_screen();
 
-	char welcome[] = "Welcome to SoOS!";
-
-	print("+");
-	for (uint16_t i = 2; i < COLS; i++) print("-");
-	println("+");
-
-	print("|");
-	for (uint16_t i = 1; i < (uint16_t) (COLS - strlen(welcome)) / 2; i++) print(" ");
-	print(welcome);
-	for (uint16_t i = 1; i < (uint16_t) (COLS - strlen(welcome)) / 2; i++) print(" ");
-	println("|");
-
-	print("+");
-	for (uint16_t i = 2; i < COLS; i++) print("-");
-	println("+");
-
-	println("");
-
-	char buf[15];
-
-	println("Powers of two:");
-	for (uint32_t i = 0; i < 22; ++i) {
-		print(itoa(pow(2, i), buf));
-		print(", ");
-	}
-
-	println("");
-	println("");
-
-	println("Primes:");
-	for (uint32_t i = 2; i < 200; ++i) {
-		if (isPrime(i)) {
-			print(itoa(i, buf));
-			print(", ");
-		}
-	}
-
-	println("");
-	println("");
-
-	println("Fibonacci numbers:");
-	for (uint16_t i = 0; i < 20; ++i) {
-		print(itoa(fib(i), buf));
-		print(", ");
-	}
-
-	println("");
+	for (auto str: welcome) println(str);
 	println("");
 
 	init_shell();

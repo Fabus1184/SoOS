@@ -1,7 +1,7 @@
 TARGET = all
 
 CC = x86-i686-cross/bin/i686-linux-gcc
-LD = x86-i686-cross/bin/i686-linux-gcc
+LD = x86-i686-cross/bin/i686-linux-ld
 
 SRCS = ${wildcard src/*/*.cpp}
 HEADS = ${wildcard include/*/*.hpp}
@@ -11,9 +11,8 @@ CFLAGS := -Os -ffreestanding -fno-exceptions -fno-rtti -fno-pie -nostdlib -fno-b
 -nostartfiles -nodefaultlibs -Wall -Wextra -Werror \
 -Iinclude/drivers -Iinclude/interrupts -Iinclude/kernel -Iinclude/lib
 
-all: os-image.bin
-	find . -name "*.o" -delete
-	find . -name "*.bin" -not -name "os-image.bin" -delete
+all: clean
+	@$(MAKE) -f $(lastword $(MAKEFILE_LIST)) os-image.bin
 
 os-image.bin: boot.bin kernel.bin 
 	cat boot.bin kernel.bin > os-image.bin
@@ -22,7 +21,7 @@ boot.bin: src/assembly/boot.asm
 	nasm -f bin -o $@ $^
 
 kernel.bin: build/assembly/kernel_entry.o build/kernel/kernel.o $(OBJS)
-	$(LD) -Wl,--allow-multiple-definition -Wl,-Ttext=0x7e00 -Wl,--oformat=binary $^ $(CFLAGS) -o $@ -lgcc
+	$(LD) -T Linker.ld --allow-multiple-definition -o $@ $^ --oformat=binary
 
 build/%.o: src/%.cpp
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -36,4 +35,3 @@ run: all
 clean:
 	find . -name "*.bin" -delete
 	find . -name "*.o" -delete
-	

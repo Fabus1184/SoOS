@@ -1,6 +1,6 @@
 #pragma once
 
-#include <inttypes.h>
+#include <cinttypes>
 
 #include "io.hpp"
 
@@ -10,7 +10,8 @@
 
 uint32_t century_register = 0x00;
 
-struct DateTime {
+struct DateTime
+{
 
 	uint8_t second;
 	uint8_t minute;

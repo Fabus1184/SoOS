@@ -1,6 +1,6 @@
 #pragma once
 
-#include <inttypes.h>
+#include <cinttypes>
 
 #include "soos_string.hpp"
 #include "soos_mem.hpp"
@@ -9,8 +9,6 @@
 #include "commands.hpp"
 
 #define PROMPT "$ SoOS CLI -> "
-#define CURSOR "_"
+#define N_BUF 60
 
-void input(char c);
-
-void init_shell();
+[[noreturn]] void init_shell();

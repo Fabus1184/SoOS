@@ -55,3 +55,21 @@ char *pad(uint16_t padding, char filler, char *buf)
 
 	return buf;
 }
+
+char *prettypointer(void *ptr, char *buf)
+{
+	itoa((uint32_t) ptr, buf);
+	pad(10, '0', buf);
+	buf[1] = 'x';
+	return buf;
+}
+
+int32_t find(char c, char *str)
+{
+	for (int32_t i = 0; i < (int32_t) strlen(str); ++i) {
+		if (str[i] == c) return i;
+	}
+
+	return -1;
+}
+
