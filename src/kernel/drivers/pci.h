@@ -3,17 +3,13 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 #include <lib/io.h>
 #include <lib/memory.h>
 
 struct pci_header_0 {
-    uint32_t bar0;
-    uint32_t bar1;
-    uint32_t bar2;
-    uint32_t bar3;
-    uint32_t bar4;
-    uint32_t bar5;
+    uint32_t bar[5];
     uint32_t cardbus_cis_pointer;
     uint16_t subsystem_vendor_id;
     uint16_t subsystem_id;
@@ -29,8 +25,7 @@ struct pci_header_0 {
 };
 
 struct pci_header_1 {
-    uint32_t bar0;
-    uint32_t bar1;
+    uint32_t bar[2];
     uint32_t primary_bus_number;
     uint32_t secondary_bus_number;
     uint32_t subordinate_bus_number;
@@ -78,7 +73,7 @@ struct pci_header_2 {
     uint32_t legacy_base_address;
 };
 
-struct pci_device {
+struct __attribute__((packed)) pci_device {
     uint32_t bus;
     uint32_t slot;
     uint32_t function;
@@ -93,9 +88,7 @@ struct pci_device {
     uint8_t class_code;
     uint8_t cache_line_size;
     uint8_t latency_timer;
-    enum {
-        GENERAL_DEVICE, PCI_TO_PCI_BRIDGE, CARDBUS_BRIDGE
-    } header_type;
+    uint8_t header_type;
     uint8_t bist;
 
     union {
@@ -104,6 +97,20 @@ struct pci_device {
         struct pci_header_2 header_2;
     } header;
 };
+
+union BAR {
+    uint64_t address;
+    bool is_mem;
+    struct {
+        uint8_t type;
+        bool prefetchable;
+    } BAR_MEM_SPACE;
+    struct {
+        bool reserved;
+    } BAR_IO_SPACE;
+};
+
+union BAR pci_read_bar(const struct pci_device *device, uint8_t bar_index);
 
 uint32_t pci_enumerate_devices(struct pci_device *devices, uint32_t max_devices);
 

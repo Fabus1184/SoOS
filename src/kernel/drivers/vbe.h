@@ -37,7 +37,7 @@
 #define VBE_DISPI_LFB_ENABLED           0x40
 #define VBE_DISPI_NOCLEARMEM            0x80
 
-void vbe_init(uint16_t width, uint16_t height, uint8_t bpp);
+int32_t vbe_init(uint16_t _width, uint16_t height, uint8_t _bpp, const struct pci_device *vga_controller);
 
 void vbe_pixel(uint16_t x, uint16_t y, uint32_t color);
 

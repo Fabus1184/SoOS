@@ -5,20 +5,75 @@
 uint32_t pci_config_read32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
     uint32_t address =
             ((uint32_t) bus << 16) | ((uint32_t) slot << 11) | ((uint32_t) func << 8) | (offset & 0xFC) | 0x80000000U;
-    io_write32(0xCF8, address);
+    io_write32(address, 0xCF8);
     return io_read32(0xCFC);
 }
 
 uint16_t pci_config_read16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
-    return (uint16_t) (pci_config_read32(bus, slot, func, offset) >> ((offset & 2) * 8U));
+    return (uint16_t) (pci_config_read32(bus, slot, func, offset) >> ((offset & 2U) * 8U));
 }
 
 uint8_t pci_config_read8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
-    return (uint8_t) (pci_config_read16(bus, slot, func, offset & 0xFC) >> ((offset & 2) * 8U));
+    return (uint8_t) (pci_config_read16(bus, slot, func, offset) >> ((offset & 1U) * 8U));
 }
 
-void pci_append_device(uint8_t bus, uint8_t slot, uint8_t function, struct pci_device *devices,
-                       uint32_t *device_count, uint32_t max_devices) {
+union BAR pci_read_bar(const struct pci_device *device, uint8_t bar_index) {
+    if ((0 == device->header_type) && (bar_index > 5)) {
+        return (union BAR) {.address = 0};
+    }
+
+    if ((1 == device->header_type) && (bar_index > 1)) {
+        return (union BAR) {.address = 0};
+    }
+
+    if ((device->header_type != 0) && (device->header_type != 1)) {
+        return (union BAR) {.address = 0};
+    }
+
+    union BAR ret;
+    const uint32_t *bar = NULL;
+    switch (device->header_type) {
+        case 0:
+            bar = device->header.header_0.bar;
+            break;
+        case 1:
+            bar = device->header.header_1.bar;
+            break;
+    }
+
+    ret.is_mem = (0 == (bar[0] & 0x1U));
+
+    switch (ret.is_mem) {
+        case true:
+            /* Memory space */
+            ret.BAR_MEM_SPACE.type = (uint8_t) (bar[0] & 0x6U) >> 1U;
+            ret.BAR_MEM_SPACE.prefetchable = (0 != (bar[0] & 0x8U));
+            switch (ret.BAR_MEM_SPACE.type) {
+                case 0:
+                    /* 32-bit */
+                    ret.address = bar[0] & 0xFFFFFFF0U;
+                    break;
+                case 1:
+                    /* 16-bit */
+                    ret.address = bar[0] & 0xFFF0U;
+                    break;
+                case 2:
+                    /* 64-bit */
+                    ret.address = ((uint64_t) bar[1] << 32U) + (bar[0] & 0xFFFFFFF0U);
+                    break;
+            }
+            break;
+        case false:
+            /* IO space */
+            ret.BAR_IO_SPACE.reserved = (0 != (bar[0] & 0x2U));
+            ret.address = bar[0] & 0xFFFFFFFCU;
+            break;
+    }
+    return ret;
+}
+
+void pci_append_device(uint8_t bus, uint8_t slot, uint8_t function, struct pci_device *devices, uint32_t *device_count,
+                       uint32_t max_devices) {
     uint16_t vendor_id = pci_config_read16(bus, slot, function, 0x00);
 
     if (0xFFFF == vendor_id) {
@@ -29,30 +84,41 @@ void pci_append_device(uint8_t bus, uint8_t slot, uint8_t function, struct pci_d
         return;
     }
 
-    uint16_t header_type = pci_config_read8(bus, slot, function, 0x0E);
+    struct pci_device *device = devices + *device_count;
+    device->bus = bus;
+    device->slot = slot;
+    device->function = function;
 
-    if ((0 == function) && (0 != (header_type & 0b10000000))) {
-        for (uint8_t ffunction = 0; ffunction < 8; ++ffunction) {
+    for (uint32_t i = 0; i < 4; ++i) {
+        *(3 + i + (uint32_t *) device) = pci_config_read32(bus, slot, function, i * 4);
+    }
+
+    switch (device->header_type & 0b11) {
+        case 0:
+            for (uint32_t i = 0; i < 12; ++i) {
+                ((uint32_t *) &device->header.header_0)[i] = pci_config_read32(bus, slot, function, i * 4);
+            }
+            break;
+        case 1:
+            for (uint32_t i = 0; i < 12; ++i) {
+                ((uint32_t *) &device->header.header_1)[i] = pci_config_read32(bus, slot, function, i * 4);
+            }
+            break;
+        case 2:
+            for (uint32_t i = 0; i < 14; ++i) {
+                ((uint32_t *) &device->header.header_2)[i] = pci_config_read32(bus, slot, function, i * 4);
+            }
+            break;
+        default:
+            break;
+    }
+
+    ++(*device_count);
+
+    if (0 != (device->header_type & 0x80U)) {
+        for (uint8_t ffunction = 1; ffunction < 8; ++ffunction) {
             pci_append_device(bus, slot, ffunction, devices, device_count, max_devices);
         }
-    } else {
-        devices[*device_count].bus = bus;
-        devices[*device_count].slot = slot;
-        devices[*device_count].function = function;
-        devices[*device_count].vendor_id = vendor_id;
-        devices[*device_count].device_id = pci_config_read16(bus, slot, function, 0x02);
-        devices[*device_count].command = pci_config_read16(bus, slot, function, 0x04);
-        devices[*device_count].status = pci_config_read16(bus, slot, function, 0x06);
-        devices[*device_count].revision_id = pci_config_read8(bus, slot, function, 0x08);
-        devices[*device_count].prog_if = pci_config_read8(bus, slot, function, 0x09);
-        devices[*device_count].subclass = pci_config_read8(bus, slot, function, 0x0A);
-        devices[*device_count].class_code = pci_config_read8(bus, slot, function, 0x0B);
-        devices[*device_count].cache_line_size = pci_config_read8(bus, slot, function, 0x0C);
-        devices[*device_count].latency_timer = pci_config_read8(bus, slot, function, 0x0D);
-        devices[*device_count].header_type = header_type & 0b11;
-        devices[*device_count].bist = pci_config_read8(bus, slot, function, 0x0F);
-
-        ++(*device_count);
     }
 }
 
@@ -349,7 +415,7 @@ void pci_get_description(const struct pci_device *device, char *class_name, char
     for (; class_index < class_code_size; ++class_index) {
         if (device->class_code == class_codes[class_index].class_code) {
             memcpy(class_name, class_codes[class_index].class_code_name,
-                   strlen(class_codes[class_index].class_code_name));
+                   strlen(class_codes[class_index].class_code_name) + 1);
             break;
         }
     }
@@ -362,7 +428,7 @@ void pci_get_description(const struct pci_device *device, char *class_name, char
     for (; subclass_index < class_codes[class_index].subclass_size; ++subclass_index) {
         if (device->subclass == class_codes[class_index].subclasses[subclass_index].subclass) {
             memcpy(subclass_name, class_codes[class_index].subclasses[subclass_index].subclass_name,
-                   strlen(class_codes[class_index].subclasses[subclass_index].subclass_name));
+                   strlen(class_codes[class_index].subclasses[subclass_index].subclass_name) + 1);
             break;
         }
     }
@@ -376,7 +442,8 @@ void pci_get_description(const struct pci_device *device, char *class_name, char
         if (device->prog_if == class_codes[class_index].subclasses[subclass_index].prog_ifs[prog_if_index].prog_if) {
             memcpy(prog_if_name,
                    class_codes[class_index].subclasses[subclass_index].prog_ifs[prog_if_index].prog_if_name,
-                   strlen(class_codes[class_index].subclasses[subclass_index].prog_ifs[prog_if_index].prog_if_name));
+                   strlen(class_codes[class_index].subclasses[subclass_index].prog_ifs[prog_if_index].prog_if_name) +
+                   1);
             break;
         }
     }

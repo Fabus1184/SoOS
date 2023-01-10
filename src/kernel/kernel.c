@@ -62,7 +62,7 @@ void terminal_setcolor(uint8_t color) {
 }
 
 void terminal_putentryat(char c, uint8_t color, size_t x, size_t y) {
-    const size_t index = y * VGA_WIDTH + x;
+    const size_t index = (y * VGA_WIDTH) + x;
     terminal_buffer[index] = vga_entry(c, color);
 }
 
@@ -76,8 +76,9 @@ void terminal_putchar(char c) {
 }
 
 void terminal_write(const char *data, size_t size) {
-    for (size_t i = 0; i < size; i++)
+    for (size_t i = 0; i < size; ++i) {
         terminal_putchar(data[i]);
+    }
 }
 
 void terminal_writestring(const char *data) {
@@ -95,11 +96,12 @@ void reverse(char *str, size_t len) {
     }
 }
 
-char *itoa(size_t n, char *s) {
+char *itoa(size_t n, char *s, uint8_t base) {
+    const char *digits = "0123456789ABCDEF";
     size_t i = 0;
     do {
-        s[i++] = '0' + (int8_t) (n % 10);
-        n /= 10;
+        s[i++] = digits[n % base];
+        n /= base;
     } while (n > 0);
     s[i] = '\0';
     reverse(s, i);
@@ -108,31 +110,13 @@ char *itoa(size_t n, char *s) {
 
 void print_pci_device(const struct pci_device *device) {
     char buffer[100];
-    terminal_writestring("PCI: Bus ");
-    terminal_writestring(itoa(device->bus, buffer));
-    terminal_writestring(",Dev ");
-    terminal_writestring(itoa(device->slot, buffer));
-    terminal_writestring(",Func ");
-    terminal_writestring(itoa(device->function, buffer));
-    terminal_writestring(",vID ");
-    terminal_writestring(itoa(device->vendor_id, buffer));
-    terminal_writestring(",dID ");
-    terminal_writestring(itoa(device->device_id, buffer));
-    terminal_writestring(",CC ");
-    terminal_writestring(itoa(device->class_code, buffer));
-    terminal_writestring(",SC ");
-    terminal_writestring(itoa(device->subclass, buffer));
-    terminal_writestring(",PI ");
-    terminal_writestring(itoa(device->prog_if, buffer));
-    terminal_writestring(",HT ");
-    terminal_writestring(itoa(device->header_type, buffer));
-    terminal_writestring(",LT ");
-    terminal_writestring(itoa(device->latency_timer, buffer));
-    terminal_writestring(",CLS ");
-    terminal_writestring(itoa(device->cache_line_size, buffer));
-
-    terminal_column = 0;
-    ++terminal_row;
+    terminal_writestring("Bus ");
+    terminal_writestring(itoa(device->bus, buffer, 16));
+    terminal_writestring(" Device ");
+    terminal_writestring(itoa(device->slot, buffer, 16));
+    terminal_writestring(" Func ");
+    terminal_writestring(itoa(device->function, buffer, 16));
+    terminal_writestring(" : ");
 
     char a[100], b[100], c[100];
     pci_get_description(device, a, b, c);
@@ -142,42 +126,44 @@ void print_pci_device(const struct pci_device *device) {
     terminal_writestring(" - ");
     terminal_writestring(c);
 
+
     terminal_column = 0;
     ++terminal_row;
 }
 
-void kernel_main(void) {
+_Noreturn void kernel_main(void) {
     struct pci_device devices[64];
-
-    /* Initialize terminal interface */
-    terminal_initialize();
-
-    /* Newline support is left as an exercise. */
-    terminal_write("Hello, kernel World!", 20);
-    ++terminal_row;
-    terminal_column = 0;
-
     uint32_t device_count = pci_enumerate_devices(devices, 64);
 
-    char buffer[20];
-    memset(buffer, 0, 10);
-    itoa(device_count, buffer);
-    terminal_writestring(buffer);
-    ++terminal_row;
-    terminal_column = 0;
+    const struct pci_device *vga_controller = NULL;
+    for (uint32_t i = 0; i < device_count; ++i) {
+        if ((0x1234 == devices[i].vendor_id) && (0x1111 == devices[i].device_id)) {
+            vga_controller = devices + i;
+            break;
+        }
+    }
+    if (NULL == vga_controller) {
+        terminal_initialize();
+        terminal_writestring("ERROR: No VGA controller found!");
+        asm volatile ("hlt");
+    }
 
-    for (uint32_t d = 0; d < device_count; ++d) {
-        print_pci_device(devices + d);
+    int32_t r = vbe_init(800, 600, 24, vga_controller);
+    if (0 != r) {
+        terminal_initialize();
+        terminal_writestring("ERROR: Failed to initialize VBE!: ");
+        char buffer[100];
+        terminal_writestring(itoa((uint8_t) r, buffer, 10));
+        asm volatile ("hlt");
+    }
+
+    for (uint16_t y = 0; y < 600; ++y) {
+        for (uint16_t x = 0; x < 800; ++x) {
+            vbe_pixel(x, y, x + y);
+        }
     }
 
     while (1) {
-    }
 
-    vbe_init(800, 600, 24);
-
-    for (uint16_t y = 0; y < 800; ++y) {
-        for (uint16_t x = 0; x < 600; ++x) {
-            vbe_pixel(x, y, 0xFF00FF);
-        }
     }
 }
