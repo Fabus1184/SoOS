@@ -1,38 +1,27 @@
-TARGET = all
+CC = ./x86-i686--glibc--stable-2022.08-1/bin/i686-buildroot-linux-gnu-gcc.br_real
+AS = ./x86-i686--glibc--stable-2022.08-1/bin/i686-buildroot-linux-gnu-as
+CFLAGS = -ffreestanding -O2 -nostdlib -Wall -Wextra -march=i386 -std=gnu99 -Ilib -Isrc
+SOURCES = $(shell find src -name '*.c')
+OBJS = $(patsubst src/%,build/%,$(SOURCES:.c=.o))
 
-CC = gcc
-LD = ld
+run: SoOS.iso
+	qemu-system-i386 -cdrom $^ -d guest_errors -m 16 -vga std # -S -gdb tcp::1234
 
-SRCS = ${wildcard src/*/*.c src/*/*/*.c}
-HEADS = ${wildcard src/*/*.h src/*/*/*.h}
-OBJS = ${SRCS:.c=.o src/assembly/interrupt.o src/assembly/int32.o}
+SoOS.iso: build/soos.bin iso/boot/grub/grub.cfg
+	grub-file --is-x86-multiboot build/soos.bin
+	cp build/soos.bin iso/boot/
+	grub-mkrescue -o $@ iso
 
-CFLAGS := -m32 -Os -ffreestanding -fno-exceptions -fno-pie -nostdlib -fno-builtin -fno-stack-protector -nostartfiles \
-	-nodefaultlibs -Wall -Wextra -Isrc -std=gnu11
+build/soos.bin: build/boot.o $(OBJS)
+	$(CC) -T linker.ld -o $@ $(CFLAGS) $^ -lgcc
 
-all: clean
-	@echo "Sources: " $(SRCS)
-	@echo "Headers: " $(HEADS)
-	@$(MAKE) -f $(lastword $(MAKEFILE_LIST)) os-image.bin
+$(OBJS): $(SOURCES)
+	@mkdir -p $(@D)
+	$(foreach src,$(SOURCES),$(CC) -c $(src) -o $(patsubst src/%,build/%,$(src:.c=.o)) $(CFLAGS) || exit;)
 
-os-image.bin: boot.bin kernel.bin 
-	cat boot.bin kernel.bin > os-image.bin
-
-boot.bin: src/assembly/boot.asm
-	nasm -f bin -o $@ $^
-
-kernel.bin: src/assembly/kernel_entry.o src/kernel/kernel.o $(OBJS)
-	$(LD) --allow-multiple-definition -melf_i386 -T Linker.ld -o $@ $^ --oformat=binary
-
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
-
-src/assembly/%.o: src/assembly/%.asm
-	nasm $< -f elf -o $@
-
-run: all
-	./run.sh
+build/boot.o: src/boot.asm
+	$(AS) $^ -o $@
 
 clean:
-	find . -name "*.bin" -delete
-	find . -name "*.o" -delete
+	rm -r build/*
+	rm SoOS.iso 2>/dev/null || true
