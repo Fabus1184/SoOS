@@ -1,12 +1,12 @@
 #ifndef SOOS_PCI_H
 #define SOOS_PCI_H
 
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
-
 #include <lib/io.h>
 #include <lib/memory.h>
+#include <lib/string.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 struct pci_header_0 {
     uint32_t bar[5];
@@ -114,6 +114,6 @@ union BAR pci_read_bar(const struct pci_device *device, uint8_t bar_index);
 
 uint32_t pci_enumerate_devices(struct pci_device *devices, uint32_t max_devices);
 
-void pci_get_description(const struct pci_device *device, char *class_name, char *subclass_name, char *prog_if_name);
+void pci_get_description(const struct pci_device *device, char **class_name, char **subclass_name, char **prog_if_name);
 
-#endif //SOOS_PCI_H
+#endif  // SOOS_PCI_H
