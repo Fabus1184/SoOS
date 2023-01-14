@@ -1,6 +1,6 @@
 # SoOS
 
-x86 operating system from scratch written in C using
+x86 operating system from scratch written in C and assembly using
 - [GRUB](https://www.gnu.org/software/grub/)
 - various [stb](https://github.com/nothings/stb) libraries
 
