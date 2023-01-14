@@ -806,3 +806,47 @@ Continuing.
 Cannot execute this command while the target is running.
 Use the "interrupt" command to stop the target
 and then try again.
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x0000fff0 in ?? ()
+Continuing.
+
+Program received signal SIGINT, Interrupt.
+0x00003531 in stack ()
+The history is empty.
+Stack level 0, frame at 0x77728:
+ eip = 0x3531 in stack; saved eip = 0x0
+ called by frame at 0x10007
+ Arglist at 0x77720, args: 
+ Locals at 0x77720, Previous frame's sp is 0x77728
+ Saved registers:
+  eip at 0x77724
+#0  0x00003531 in stack ()
+#0  0x00003531 in stack ()
+Quit
+
+quit
+Please answer y or n.
+Detaching from pid process 1
+Remote communication error.  Target disconnected.: Broken pipe.
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x0000fff0 in ?? ()
+Continuing.
+
+Program received signal SIGINT, Interrupt.
+0x00003531 in stack ()
+#0  0x00003531 in stack ()
+#0  0x00003531 in stack ()
+Continuing.
+
+Program received signal SIGINT, Interrupt.
+0x00003531 in stack ()
+#0  0x00003531 in stack ()
+Quit
+
+quit
+Detaching from pid process 1
+Remote communication error.  Target disconnected.: Broken pipe.

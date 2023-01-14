@@ -29,6 +29,8 @@ global _start
 _start:
     call    pre_kernel
 
+global boot_kernel
+boot_kernel:
 	mov     esp, kernel_stack_end
     call    kernel_main
     hlt

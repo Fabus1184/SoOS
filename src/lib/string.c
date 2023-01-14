@@ -19,3 +19,28 @@ char *itoa(size_t n, char *s, uint8_t base) {
     reverse((uint8_t *) s, i);
     return s;
 }
+
+uint64_t prefix_decimal(uint64_t n, char **prefix) {
+    if (n < 1024) {
+        *prefix = "";
+        return n;
+    } else if (n < (1024ULL * 1024ULL)) {
+        *prefix = "K";
+        return n / (1024ULL);
+    } else if (n < (1024ULL * 1024ULL * 1024ULL)) {
+        *prefix = "M";
+        return n / (1024ULL * 1024ULL);
+    } else if (n < (1024ULL * 1024ULL * 1024ULL * 1024ULL)) {
+        *prefix = "G";
+        return n / (1024ULL * 1024ULL * 1024ULL);
+    } else if (n < (1024ULL * 1024ULL * 1024ULL * 1024ULL * 1024ULL)) {
+        *prefix = "T";
+        return n / (1024ULL * 1024ULL * 1024ULL * 1024ULL);
+    } else if (n < (1024ULL * 1024ULL * 1024ULL * 1024ULL * 1024ULL * 1024ULL)) {
+        *prefix = "P";
+        return n / (1024ULL * 1024ULL * 1024ULL * 1024ULL * 1024ULL);
+    } else {
+        *prefix = "E";
+        return n / (1024ULL * 1024ULL * 1024ULL * 1024ULL * 1024ULL * 1024ULL);
+    }
+}

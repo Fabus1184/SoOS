@@ -56,3 +56,4 @@ dkms.conf
 x86-i686-cross/
 x86-i686--glibc--stable-2022.08-1/
 .idea/
+build/*

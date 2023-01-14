@@ -12,11 +12,41 @@ void print_pci_device(const struct pci_device *dev) {
     kprintf("%02x:%02x.%x: %s - %s (%04x)\n", dev->bus, dev->device_id, dev->function, a, b, dev->vendor_id);
 }
 
+struct __attribute__((packed)) memory_region {
+    uint64_t base;
+    uint64_t length;
+    /* TODO: very bad style: the size of enum type is defined by it's maximum value because of attribute packed */
+    enum { AVAILABLE = 1, RESERVED = 2, ACPI_RECLAIMABLE = 3, ACPI_NVS = 4, BAD_MEMORY = 5, _MAX = (1 << 31) } type;
+    uint32_t acpi_3_0_extended_attributes;
+};
+
+const char *memory_type_names[6] = {
+    "?", "Available", "Reserved", "ACPI reclaimable", "ACPI NVS", "Bad memory",
+};
+
+extern uint16_t low_memory;
+extern struct memory_region high_memory[];
+extern uint16_t high_memory_size;
+
+void print_memory_map(void) {
+    kprintf("Detected %u KB of low memory\n", low_memory);
+    uint8_t region_count = high_memory_size / 24;
+    kprintf("Detected %d regions of high memory\n", region_count);
+    for (uint8_t i = 0; i < region_count; ++i) {
+        char *prefix = "";
+        uint64_t length = prefix_decimal(high_memory[i].length, &prefix);
+        kprintf("Region %2u: base: %#15llx, length: %3lld%s, type: %s\n", i, high_memory[i].base, length, prefix,
+                memory_type_names[high_memory[i].type]);
+    }
+}
+
 void __attribute__((noreturn)) kernel_main(void) {
     gdt_install();
 
     init_text_mode();
     kprintf("Hello, world!\n");
+
+    print_memory_map();
 
     isr_install();
     enable_interrupts();
@@ -24,6 +54,7 @@ void __attribute__((noreturn)) kernel_main(void) {
     struct pci_device devices[64];
     uint32_t device_count = pci_enumerate_devices(devices, 64);
 
+    kprintf("Found %u PCI devices\n", device_count);
     const struct pci_device *vga_controller = NULL;
     for (uint32_t i = 0; i < device_count; ++i) {
         print_pci_device(devices + i);

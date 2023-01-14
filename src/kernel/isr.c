@@ -131,7 +131,7 @@ void isr_handler(struct registers_t *r) {
 void register_interrupt_handler(uint8_t n, isr_t handler) { interrupt_handlers[n] = handler; }
 
 void irq_handler(struct registers_t *r) {
-    kprintf("Received IRQ%d: %s\n", r->int_no - IRQ0, isrs[(r->int_no * 2) + 1]);
+    /* kprintf("Received IRQ%d: %s\n", r->int_no - IRQ0, isrs[(r->int_no * 2) + 1]); */
 
     if (interrupt_handlers[r->int_no] != NULL) {
         isr_t handler = interrupt_handlers[r->int_no];
