@@ -3,6 +3,7 @@
 #include <kernel/drivers/vga_text.h>
 #include <kernel/gdt.h>
 #include <kernel/isr.h>
+#include <kernel/rtc.h>
 #include <stb/stb_sprintf.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -45,7 +46,9 @@ void __attribute__((noreturn)) kernel_main(void) {
     gdt_install();
 
     init_text_mode();
-    kprintf("Hello, world!\n");
+
+    struct rtc_time time = get_rtc_time();
+    kprintf("Hello, world! @ %02u.%02u.%04u %02u:%02u:%02u\n", time.day_of_month, time.month, time.year, time.hours, time.minutes, time.seconds);
 
     print_memory_map();
 
