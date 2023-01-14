@@ -33,3 +33,21 @@ void reverse(uint8_t *data, size_t len) {
         --j;
     }
 }
+
+uint32_t memcmp(const void *a, const void *b, size_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        if (((const uint8_t *) a)[i] != ((const uint8_t *) b)[i]) {
+            return ((const uint8_t *) a)[i] - ((const uint8_t *) b)[i];
+        }
+    }
+    return 0;
+}
+
+bool find(void *array, uint32_t size, uint32_t element_size, void *element) {
+    for (uint32_t i = 0; i < size; ++i) {
+        if (memcmp(array + i * element_size, element, element_size) == 0) {
+            return true;
+        }
+    }
+    return false;
+}

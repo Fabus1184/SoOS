@@ -110,6 +110,12 @@ union BAR {
     } BAR_IO_SPACE;
 };
 
+void pci_config_write8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint8_t value);
+
+void pci_config_write16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint16_t value);
+
+void pci_config_write32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t value);
+
 union BAR pci_read_bar(const struct pci_device *device, uint8_t bar_index);
 
 uint32_t pci_enumerate_devices(struct pci_device *devices, uint32_t max_devices);

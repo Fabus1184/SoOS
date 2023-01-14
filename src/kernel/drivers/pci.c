@@ -1,5 +1,21 @@
 #include "pci.h"
 
+void pci_config_write8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint8_t value) {
+    uint32_t address = ((uint32_t) bus << 16) | ((uint32_t) slot << 11) | ((uint32_t) func << 8) | (offset & 0xFC) | 0x80000000U;
+    io_write32(address, 0xCF8);
+    io_write8(value, 0xCFC + (offset & 3U));
+}
+
+void pci_config_write16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint16_t value) {
+    pci_config_write8(bus, slot, func, offset, (uint8_t) (value & 0xFFU));
+    pci_config_write8(bus, slot, func, offset + 1U, (uint8_t) (value >> 8U));
+}
+
+void pci_config_write32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t value) {
+    pci_config_write16(bus, slot, func, offset, (uint16_t) (value & 0xFFFFU));
+    pci_config_write16(bus, slot, func, offset + 2U, (uint16_t) (value >> 16U));
+}
+
 uint32_t pci_config_read32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
     uint32_t address = ((uint32_t) bus << 16) | ((uint32_t) slot << 11) | ((uint32_t) func << 8) | (offset & 0xFC) | 0x80000000U;
     io_write32(address, 0xCF8);
@@ -81,9 +97,12 @@ void pci_append_device(uint8_t bus, uint8_t slot, uint8_t function, struct pci_d
     }
 
     struct pci_device *device = devices + *device_count;
+    memset(device, 0xFF, sizeof(struct pci_device));
+
     device->bus = bus;
     device->slot = slot;
     device->function = function;
+    device->vendor_id = vendor_id;
 
     for (uint32_t i = 0; i < 4; ++i) {
         *(3 + i + (uint32_t *) device) = pci_config_read32(bus, slot, function, i * 4);
@@ -91,17 +110,17 @@ void pci_append_device(uint8_t bus, uint8_t slot, uint8_t function, struct pci_d
 
     switch (device->header_type & 0b11) {
         case 0:
-            for (uint32_t i = 0; i < 12; ++i) {
+            for (uint32_t i = 4; i < 16; ++i) {
                 ((uint32_t *) &device->header.header_0)[i] = pci_config_read32(bus, slot, function, i * 4);
             }
             break;
         case 1:
-            for (uint32_t i = 0; i < 12; ++i) {
+            for (uint32_t i = 4; i < 16; ++i) {
                 ((uint32_t *) &device->header.header_1)[i] = pci_config_read32(bus, slot, function, i * 4);
             }
             break;
         case 2:
-            for (uint32_t i = 0; i < 14; ++i) {
+            for (uint32_t i = 4; i < 18; ++i) {
                 ((uint32_t *) &device->header.header_2)[i] = pci_config_read32(bus, slot, function, i * 4);
             }
             break;

@@ -1,3 +1,4 @@
+#include <kernel/drivers/intel8254x.h>
 #include <kernel/drivers/pci.h>
 #include <kernel/drivers/vga_text.h>
 #include <kernel/gdt.h>
@@ -62,6 +63,8 @@ void __attribute__((noreturn)) kernel_main(void) {
             vga_controller = devices + i;
         }
     }
+
+    init_intel8254x_devices(devices, device_count);
 
     if (NULL == vga_controller) {
         kprintf("ERROR: No VGA controller found!\n");
