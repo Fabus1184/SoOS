@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -m32 -march=i386 -fno-stack-protector -g -ffreestanding -O2 -nostdlib -Wall -Wextra -march=i386 -std=gnu99 -Ilib -Isrc -I/usr/include
+CFLAGS = -m32 -no-pie -fno-stack-protector -g -ffreestanding -O2 -nostdlib -Wall -Wextra -march=i386 -std=gnu99 -Ilib -Isrc -I/usr/include
 SOURCES = $(shell find src -name '*.c')
 ASM_SOURCES = $(shell find src -name '*.asm')
 OBJS = $(patsubst src/%,build/%,$(SOURCES:.c=.o)) 
@@ -14,8 +14,7 @@ SoOS.iso: build/soos.bin iso/boot/grub/grub.cfg
 	grub-mkrescue -o $@ iso
 
 build/soos.bin: $(ASMS) $(OBJS)
-	@printf "Asms: $(ASMS)\n"
-	$(CC) -T linker.ld -o $@ $(CFLAGS) $^ -lgcc
+	$(CC) -T linker.ld -Wl,--fatal-warnings -o $@ $(CFLAGS) $^ -lgcc
 	objcopy --only-keep-debug $@ $@.debug
 	objcopy --strip-debug $@
 

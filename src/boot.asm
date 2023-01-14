@@ -27,7 +27,7 @@ align 4
 
 global _start
 _start:
-    ;call    pre_kernel
+    call    pre_kernel
 
 	mov     esp, kernel_stack_end
     call    kernel_main
