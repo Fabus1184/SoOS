@@ -145,7 +145,7 @@ struct class_code {
 
 const uint8_t class_code_size = 22;
 const struct class_code class_codes[22] = {
-    {0x00, "Unclassified", 2, {{0x00, "Non-VGA unclassified device", 0}, {0x01, "VGA compatible unclassified device", 0, {}}}},
+    {0x00, "Unclassified", 2, {{0x00, "Non-VGA unclassified device", 0, {}}, {0x01, "VGA compatible unclassified device", 0, {}}}},
     {0x01,
      "Mass Storage Controller",
      2,
@@ -359,7 +359,7 @@ const struct class_code class_codes[22] = {
       {0x80, "Other", 0, {}}}},
     {0xFF, "Unassigned Class", 0, {}}};
 
-void pci_get_description(const struct pci_device *device, char **class_name, char **subclass_name, char **prog_if_name) {
+void pci_get_description(const struct pci_device *device, const char **class_name, const char **subclass_name, const char **prog_if_name) {
     static char unknown[8] = "Unknown";
     if (class_name != NULL) {
         *class_name = unknown;

@@ -1,0 +1,808 @@
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x0000fff0 in ?? ()
+
+quit
+Detaching from pid process 1
+Ending remote debugging.
+[Inferior 1 (process 1) detached]
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x0000fff0 in ?? ()
+Breakpoint 1 at 0x102310: file src/kernel/isr.c, line 71.
+Continuing.
+
+Breakpoint 1, irq_install () at src/kernel/isr.c:71
+71	    asm volatile("cli");
+Breakpoint 2 at 0x10125d: file src/kernel/kernel.c, line 21.
+Continuing.
+
+Breakpoint 2, kernel_main () at src/kernel/kernel.c:22
+22	    uint32_t device_count = pci_enumerate_devices(devices, 64);
+pci_enumerate_devices (devices=<unavailable>, max_devices=<unavailable>) at src/kernel/drivers/pci.c:121
+121	uint32_t pci_enumerate_devices(struct pci_device *devices, uint32_t max_devices) {
+pci_enumerate_devices (devices=0x1011eb <irq15>, max_devices=0) at src/kernel/drivers/pci.c:122
+122	    uint32_t device_count = 0;
+123	    for (uint8_t bus = 0; bus < 0xFF; ++bus) {
+124	        for (uint8_t slot = 0; slot < 32; ++slot) {
+pci_append_device (bus=0 '\000', slot=0 '\000', function=0 '\000', devices=0xc0c7f0, device_count=0xc0c7bc, max_devices=64) at src/kernel/drivers/pci.c:72
+72	void pci_append_device(uint8_t bus, uint8_t slot, uint8_t function, struct pci_device *devices, uint32_t *device_count, uint32_t max_devices) {
+pci_append_device (bus=96 '`', slot=0 '\000', function=0 '\000', devices=0xc0c7b0, device_count=0x0, max_devices=12634044) at src/kernel/drivers/pci.c:73
+73	    uint16_t vendor_id = pci_config_read16(bus, slot, function, 0x00);
+pci_config_read16 (offset=0 '\000', func=0 '\000', slot=0 '\000', bus=96 '`') at src/kernel/drivers/pci.c:10
+10	    return (uint16_t) (pci_config_read32(bus, slot, func, offset) >> ((offset & 2U) * 8U));
+pci_config_read32 (offset=0 '\000', func=0 '\000', slot=0 '\000', bus=96 '`') at src/kernel/drivers/pci.c:4
+4	    uint32_t address = ((uint32_t) bus << 16) | ((uint32_t) slot << 11) | ((uint32_t) func << 8) | (offset & 0xFC) | 0x80000000U;
+5	    io_write32(address, 0xCF8);
+io_write32 (value=<unavailable>, port=<unavailable>) at src/lib/io.c:7
+7	void io_write32(uint32_t value, uint32_t port) { asm volatile("outl %0, %1" : : "a"(value), "Nd"(port)); }
+pci_config_read32 (offset=0 '\000', func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:6
+6	    return io_read32(0xCFC);
+io_read32 (port=<unavailable>) at src/lib/io.c:23
+23	    asm volatile("inl %1, %0" : "=a"(ret) : "Nd"(port));
+24	    return ret;
+pci_append_device (bus=<unavailable>, slot=<unavailable>, function=<unavailable>, devices=<unavailable>, device_count=<unavailable>, max_devices=<unavailable>) at src/kernel/drivers/pci.c:75
+75	    if (0xFFFF == vendor_id) {
+79	    if (*device_count >= max_devices) {
+83	    struct pci_device *device = devices + *device_count;
+84	    device->bus = bus;
+85	    device->slot = slot;
+86	    device->function = function;
+88	    for (uint32_t i = 0; i < 4; ++i) {
+89	        *(3 + i + (uint32_t *) device) = pci_config_read32(bus, slot, function, i * 4);
+pci_config_read32 (offset=0 '\000', func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:5
+5	    io_write32(address, 0xCF8);
+io_write32 (value=<unavailable>, port=<unavailable>) at src/lib/io.c:7
+7	void io_write32(uint32_t value, uint32_t port) { asm volatile("outl %0, %1" : : "a"(value), "Nd"(port)); }
+pci_config_read32 (offset=0 '\000', func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:6
+6	    return io_read32(0xCFC);
+io_read32 (port=<unavailable>) at src/lib/io.c:23
+23	    asm volatile("inl %1, %0" : "=a"(ret) : "Nd"(port));
+24	    return ret;
+pci_append_device (bus=<unavailable>, slot=<unavailable>, function=<unavailable>, devices=<unavailable>, device_count=<unavailable>, max_devices=<unavailable>) at src/kernel/drivers/pci.c:88
+88	    for (uint32_t i = 0; i < 4; ++i) {
+89	        *(3 + i + (uint32_t *) device) = pci_config_read32(bus, slot, function, i * 4);
+pci_config_read32 (offset=4 '\004', func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:5
+5	    io_write32(address, 0xCF8);
+io_write32 (value=<unavailable>, port=<unavailable>) at src/lib/io.c:7
+7	void io_write32(uint32_t value, uint32_t port) { asm volatile("outl %0, %1" : : "a"(value), "Nd"(port)); }
+pci_config_read32 (offset=4 '\004', func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:6
+6	    return io_read32(0xCFC);
+io_read32 (port=<unavailable>) at src/lib/io.c:23
+23	    asm volatile("inl %1, %0" : "=a"(ret) : "Nd"(port));
+24	    return ret;
+pci_append_device (bus=<unavailable>, slot=<unavailable>, function=<unavailable>, devices=<unavailable>, device_count=<unavailable>, max_devices=<unavailable>) at src/kernel/drivers/pci.c:88
+88	    for (uint32_t i = 0; i < 4; ++i) {
+89	        *(3 + i + (uint32_t *) device) = pci_config_read32(bus, slot, function, i * 4);
+pci_config_read32 (offset=8 '\b', func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:5
+5	    io_write32(address, 0xCF8);
+io_write32 (value=<unavailable>, port=<unavailable>) at src/lib/io.c:7
+7	void io_write32(uint32_t value, uint32_t port) { asm volatile("outl %0, %1" : : "a"(value), "Nd"(port)); }
+pci_config_read32 (offset=8 '\b', func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:6
+6	    return io_read32(0xCFC);
+io_read32 (port=<unavailable>) at src/lib/io.c:23
+23	    asm volatile("inl %1, %0" : "=a"(ret) : "Nd"(port));
+24	    return ret;
+pci_append_device (bus=<unavailable>, slot=<unavailable>, function=<unavailable>, devices=<unavailable>, device_count=<unavailable>, max_devices=<unavailable>) at src/kernel/drivers/pci.c:88
+88	    for (uint32_t i = 0; i < 4; ++i) {
+89	        *(3 + i + (uint32_t *) device) = pci_config_read32(bus, slot, function, i * 4);
+pci_config_read32 (offset=12 '\f', func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:5
+5	    io_write32(address, 0xCF8);
+io_write32 (value=<unavailable>, port=<unavailable>) at src/lib/io.c:7
+7	void io_write32(uint32_t value, uint32_t port) { asm volatile("outl %0, %1" : : "a"(value), "Nd"(port)); }
+pci_config_read32 (offset=12 '\f', func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:6
+6	    return io_read32(0xCFC);
+io_read32 (port=<unavailable>) at src/lib/io.c:23
+23	    asm volatile("inl %1, %0" : "=a"(ret) : "Nd"(port));
+24	    return ret;
+pci_append_device (bus=<unavailable>, slot=<unavailable>, function=<unavailable>, devices=<unavailable>, device_count=<unavailable>, max_devices=<unavailable>) at src/kernel/drivers/pci.c:88
+88	    for (uint32_t i = 0; i < 4; ++i) {
+92	    switch (device->header_type & 0b11) {
+95	                ((uint32_t *) &device->header.header_0)[i] = pci_config_read32(bus, slot, function, i * 4);
+pci_config_read32 (offset=<optimized out>, func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:5
+5	    io_write32(address, 0xCF8);
+io_write32 (value=<unavailable>, port=<unavailable>) at src/lib/io.c:7
+7	void io_write32(uint32_t value, uint32_t port) { asm volatile("outl %0, %1" : : "a"(value), "Nd"(port)); }
+pci_config_read32 (offset=<optimized out>, func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:6
+6	    return io_read32(0xCFC);
+io_read32 (port=<unavailable>) at src/lib/io.c:23
+23	    asm volatile("inl %1, %0" : "=a"(ret) : "Nd"(port));
+24	    return ret;
+pci_append_device (bus=<unavailable>, slot=<unavailable>, function=<unavailable>, devices=<unavailable>, device_count=<unavailable>, max_devices=<unavailable>) at src/kernel/drivers/pci.c:94
+94	            for (uint32_t i = 0; i < 12; ++i) {
+95	                ((uint32_t *) &device->header.header_0)[i] = pci_config_read32(bus, slot, function, i * 4);
+pci_config_read32 (offset=<optimized out>, func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:5
+5	    io_write32(address, 0xCF8);
+io_write32 (value=<unavailable>, port=<unavailable>) at src/lib/io.c:7
+7	void io_write32(uint32_t value, uint32_t port) { asm volatile("outl %0, %1" : : "a"(value), "Nd"(port)); }
+pci_config_read32 (offset=<optimized out>, func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:6
+6	    return io_read32(0xCFC);
+io_read32 (port=<unavailable>) at src/lib/io.c:23
+23	    asm volatile("inl %1, %0" : "=a"(ret) : "Nd"(port));
+24	    return ret;
+pci_append_device (bus=<unavailable>, slot=<unavailable>, function=<unavailable>, devices=<unavailable>, device_count=<unavailable>, max_devices=<unavailable>) at src/kernel/drivers/pci.c:94
+94	            for (uint32_t i = 0; i < 12; ++i) {
+95	                ((uint32_t *) &device->header.header_0)[i] = pci_config_read32(bus, slot, function, i * 4);
+pci_config_read32 (offset=<optimized out>, func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:5
+5	    io_write32(address, 0xCF8);
+io_write32 (value=<unavailable>, port=<unavailable>) at src/lib/io.c:7
+7	void io_write32(uint32_t value, uint32_t port) { asm volatile("outl %0, %1" : : "a"(value), "Nd"(port)); }
+pci_config_read32 (offset=<optimized out>, func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:6
+6	    return io_read32(0xCFC);
+io_read32 (port=<unavailable>) at src/lib/io.c:23
+23	    asm volatile("inl %1, %0" : "=a"(ret) : "Nd"(port));
+24	    return ret;
+pci_append_device (bus=<unavailable>, slot=<unavailable>, function=<unavailable>, devices=<unavailable>, device_count=<unavailable>, max_devices=<unavailable>) at src/kernel/drivers/pci.c:94
+94	            for (uint32_t i = 0; i < 12; ++i) {
+95	                ((uint32_t *) &device->header.header_0)[i] = pci_config_read32(bus, slot, function, i * 4);
+pci_config_read32 (offset=<optimized out>, func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:5
+5	    io_write32(address, 0xCF8);
+io_write32 (value=<unavailable>, port=<unavailable>) at src/lib/io.c:7
+7	void io_write32(uint32_t value, uint32_t port) { asm volatile("outl %0, %1" : : "a"(value), "Nd"(port)); }
+pci_config_read32 (offset=<optimized out>, func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:6
+6	    return io_read32(0xCFC);
+io_read32 (port=<unavailable>) at src/lib/io.c:23
+23	    asm volatile("inl %1, %0" : "=a"(ret) : "Nd"(port));
+24	    return ret;
+pci_append_device (bus=<unavailable>, slot=<unavailable>, function=<unavailable>, devices=<unavailable>, device_count=<unavailable>, max_devices=<unavailable>) at src/kernel/drivers/pci.c:94
+94	            for (uint32_t i = 0; i < 12; ++i) {
+95	                ((uint32_t *) &device->header.header_0)[i] = pci_config_read32(bus, slot, function, i * 4);
+pci_config_read32 (offset=<optimized out>, func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:5
+5	    io_write32(address, 0xCF8);
+io_write32 (value=<unavailable>, port=<unavailable>) at src/lib/io.c:7
+7	void io_write32(uint32_t value, uint32_t port) { asm volatile("outl %0, %1" : : "a"(value), "Nd"(port)); }
+pci_config_read32 (offset=<optimized out>, func=<unavailable>, slot=<unavailable>, bus=<unavailable>) at src/kernel/drivers/pci.c:6
+6	    return io_read32(0xCFC);
+io_read32 (port=<unavailable>) at src/lib/io.c:23
+23	    asm volatile("inl %1, %0" : "=a"(ret) : "Nd"(port));
+24	    return ret;
+pci_append_device (bus=<unavailable>, slot=<unavailable>, function=<unavailable>, devices=<unavailable>, device_count=<unavailable>, max_devices=<unavailable>) at src/kernel/drivers/pci.c:94
+94	            for (uint32_t i = 0; i < 12; ++i) {
+Breakpoint 3 at 0x10129c: file src/kernel/kernel.c, line 33.
+Continuing.
+
+Breakpoint 1, irq_install () at src/kernel/isr.c:71
+71	    asm volatile("cli");
+
+quit
+Detaching from pid process 1
+Ending remote debugging.
+[Inferior 1 (process 1) detached]
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x0000ac9a in ?? ()
+Breakpoint 1 at 0xac9a
+Continuing.
+
+Program received signal SIGINT, Interrupt.
+0x0000911d in ?? ()
+
+quit
+Detaching from pid process 1
+Ending remote debugging.
+[Inferior 1 (process 1) detached]
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x0000e82e in ?? ()
+Breakpoint 1 at 0x10126b: file src/kernel/kernel.c, line 24.
+Continuing.
+
+Breakpoint 1, kernel_main () at src/kernel/kernel.c:25
+warning: Source file is more recent than executable.
+25	    for (uint32_t i = 0; i < device_count; ++i) {
+26	        print_pci_device(devices + i);
+print_pci_device (dev=<unavailable>) at src/kernel/kernel.c:8
+8	void print_pci_device(const struct pci_device *dev) {
+10	    pci_get_description(dev, &a, &b, NULL);
+pci_get_description (device=<unavailable>, class_name=<unavailable>, subclass_name=<unavailable>, prog_if_name=<unavailable>) at src/kernel/drivers/pci.c:362
+362	void pci_get_description(const struct pci_device *device, char **class_name, char **subclass_name, char **prog_if_name) {
+pci_get_description (device=0xc0c7f0, class_name=0xc0c7c8, subclass_name=0xc0c7cc, prog_if_name=0x0) at src/kernel/drivers/pci.c:364
+364	    if (class_name != NULL) {
+365	        *class_name = unknown;
+368	    if (subclass_name != NULL) {
+369	        *subclass_name = unknown;
+372	    if (prog_if_name != NULL) {
+377	    for (; class_index < class_code_size; ++class_index) {
+378	        if (device->class_code == class_codes[class_index].class_code) {
+377	    for (; class_index < class_code_size; ++class_index) {
+378	        if (device->class_code == class_codes[class_index].class_code) {
+377	    for (; class_index < class_code_size; ++class_index) {
+378	        if (device->class_code == class_codes[class_index].class_code) {
+377	    for (; class_index < class_code_size; ++class_index) {
+378	        if (device->class_code == class_codes[class_index].class_code) {
+377	    for (; class_index < class_code_size; ++class_index) {
+378	        if (device->class_code == class_codes[class_index].class_code) {
+377	    for (; class_index < class_code_size; ++class_index) {
+378	        if (device->class_code == class_codes[class_index].class_code) {
+377	    for (; class_index < class_code_size; ++class_index) {
+378	        if (device->class_code == class_codes[class_index].class_code) {
+379	            if (class_name != NULL) {
+380	                *class_name = class_codes[class_index].class_code_name;
+387	    for (; subclass_index < class_codes[class_index].subclass_size; ++subclass_index) {
+388	        if (device->subclass == class_codes[class_index].subclasses[subclass_index].subclass) {
+389	            if (subclass_name != NULL) {
+390	                *subclass_name = class_codes[class_index].subclasses[subclass_index].subclass_name;
+397	    for (; prog_if_index < class_codes[class_index].subclasses[subclass_index].prog_if_size; ++prog_if_index) {
+print_pci_device (dev=<unavailable>) at src/kernel/kernel.c:11
+11	    kprintf("%02x:%02x.%x: %s - %s (%04x)\n", dev->bus, dev->device_id, dev->function, a, b, dev->vendor_id);
+kprintf (fmt=<unavailable>) at src/kernel/drivers/vga_text.c:42
+42	void kprintf(const char *fmt, ...) {
+kprintf (fmt=0xc00fd8 "%02x:%02x.%x: %s - %s (%04x)\n") at src/kernel/drivers/vga_text.c:44
+44	    va_start(args, fmt);
+46	    uint32_t size = stbsp_vsnprintf(NULL, 0, fmt, args);
+stbsp_vsnprintf (buf=0x0, count=0, fmt=0xc00fd8 "%02x:%02x.%x: %s - %s (%04x)\n", va=0xc0c7a4 "") at /usr/include/stb/stb_sprintf.h:1431
+1431	{
+stbsp_vsnprintf (buf=0x0, count=0, fmt=0xc0c7e4 "@", va=0xc0c7d8 "\360\307\300") at /usr/include/stb/stb_sprintf.h:1434
+1434	   if ( (count == 0) && !buf )
+1436	      c.length = 0;
+1438	      STB_SPRINTF_DECORATE( vsprintfcb )( stbsp__count_clamp_callback, &c, c.tmp, fmt, va );
+stbsp_vsprintfcb (callback=0x102450 <stbsp__count_clamp_callback>, user=0xc0c554, buf=0xc0c560 "", fmt=0xc00fd8 "%02x:%02x.%x: %s - %s (%04x)\n", va=0xc0c7a4 "") at /usr/include/stb/stb_sprintf.h:350
+350	{
+stbsp_vsprintfcb (callback=0x0, user=0x0, buf=0x0, fmt=0x0, va=0x0) at /usr/include/stb/stb_sprintf.h:358
+358	   f = fmt;
+393	         while (((stbsp__uintptr)f) & 3) {
+409	            v = *(stbsp__uint32 *)f;
+410	            c = (~v) & 0x80808080;
+411	            if (((v ^ 0x25252525) - 0x01010101) & c)
+395	            if (f[0] == '%')
+441	      tz = 0;
+445	         switch (f[0]) {
+491	            fl |= STBSP__LEADINGZERO;
+493	            goto flags_done;
+500	      if (f[0] == '*') {
+504	         while ((f[0] >= '0') && (f[0] <= '9')) {
+505	            fw = fw * 10 + f[0] - '0';
+506	            f++;
+504	         while ((f[0] >= '0') && (f[0] <= '9')) {
+510	      if (f[0] == '.') {
+525	      switch (f[0]) {
+572	      switch (f[0]) {
+1008	         h = (f[0] == 'X') ? hexu : hex;
+1009	         l = (4 << 4) | (4 << 8);
+1011	         if (fl & STBSP__LEADING_0X) {
+1018	         if (fl & STBSP__INTMAX)
+1021	            n64 = va_arg(va, stbsp__uint32);
+1024	         dp = 0;
+1026	         tail[0] = 0;
+1027	         if (n64 == 0) {
+1028	            lead[0] = 0;
+1029	            if (pr == 0) {
+stbsp_vsprintfcb (callback=<unavailable>, user=<unavailable>, buf=<unavailable>, fmt=<unavailable>, va=<unavailable>) at /usr/include/stb/stb_sprintf.h:1037
+1037	            *--s = h[n64 & ((1 << (l >> 8)) - 1)];
+1038	            n64 >>= (l >> 8);
+1039	            if (!((n64) || ((stbsp__int32)((num + STBSP__NUMSZ) - s) < pr)))
+stbsp_vsprintfcb (callback=0x0, user=0xc0c50f, buf=0x0, fmt=0x10 "S\377", va=0xc00fdb "x:%02x.%x: %s - %s (%04x)\n") at /usr/include/stb/stb_sprintf.h:1050
+1050	         cs = (stbsp__uint32)((num + STBSP__NUMSZ) - s) + ((((l >> 4) & 15)) << 24);
+1052	         l = (stbsp__uint32)((num + STBSP__NUMSZ) - s);
+1054	         goto scopy;
+1157	         if ((fl & STBSP__LEFTJUST) == 0) {
+1158	            if (fl & STBSP__LEADINGZERO) // if leading zeros, everything is in pr
+1160	               pr = (fw > pr) ? fw : pr;
+1168	         if (fw + pr) {
+1196	            sn = lead + 1;
+1197	            while (lead[0]) {
+1208	            c = cs >> 24;
+1210	            cs = (fl & STBSP__TRIPLET_COMMA) ? ((stbsp__uint32)(c - ((pr + cs) % (c + 1)))) : 0;
+1211	            while (pr > 0) {
+Breakpoint 2 at 0x101280: file src/kernel/kernel.c, line 26.
+Continuing.
+
+Program received signal SIGINT, Interrupt.
+0x00008327 in ?? ()
+
+quit
+Detaching from pid process 1
+Ending remote debugging.
+[Inferior 1 (process 1) detached]
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x0000fff0 in ?? ()
+Continuing.
+[Inferior 1 (process 1) exited normally]
+The program is not being run.
+
+quit
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x0000fff0 in ?? ()
+Continuing.
+
+Program received signal SIGINT, Interrupt.
+0x0000911d in ?? ()
+
+quit
+Detaching from pid process 1
+Remote communication error.  Target disconnected.: Broken pipe.
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x0000fff0 in ?? ()
+Continuing.
+
+Program received signal SIGINT, Interrupt.
+0x00004f0d in ?? ()
+Continuing.
+Remote communication error.  Target disconnected.: Broken pipe.
+
+quit
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x0000fff0 in ?? ()
+Continuing.
+Cannot execute this command while the target is running.
+Use the "interrupt" command to stop the target
+and then try again.
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x0000fff0 in ?? ()
+Continuing.
+
+Program received signal SIGINT, Interrupt.
+0x00ec8d03 in ?? ()
+
+quit
+Detaching from pid process 1
+Remote communication error.  Target disconnected.: Broken pipe.
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x00001fa1 in ?? ()
+Breakpoint 1 at 0x10236c: file src/kernel/isr.c, line 119.
+Breakpoint 2 at 0x102328: file src/kernel/isr.c, line 111.
+Continuing.
+
+Program received signal SIGINT, Interrupt.
+0x0000835a in ?? ()
+
+quit
+Detaching from pid process 1
+Ending remote debugging.
+[Inferior 1 (process 1) detached]
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x0000fff0 in ?? ()
+Breakpoint 1 at 0x102610: file src/kernel/isr.c, line 141.
+Continuing.
+
+Breakpoint 1, irq_handler (r=0xc0e798) at src/kernel/isr.c:141
+141	void irq_handler(struct registers_t *r) {
+142	    kprintf("Received IRQ %#x\n", r->int_no - IRQ0);
+kprintf (fmt=0x1081bf "Received IRQ %#x\n") at src/kernel/drivers/vga_text.c:49
+49	void kprintf(const char *fmt, ...) {
+51	    va_start(args, fmt);
+53	    uint32_t size = stbsp_vsnprintf(NULL, 0, fmt, args);
+54	    char buf[size + 1];
+55	    stbsp_vsprintf(buf, fmt, args);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+Undefined command: "nn".  Try "help".
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+0x0010157d	57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+0x00101573	58	        kputchar(buf[i]);
+0x00101576	58	        kputchar(buf[i]);
+0x00101577	58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+0x0010157d	57	    for (uint32_t i = 0; i < size; ++i) {
+0x00101580	57	    for (uint32_t i = 0; i < size; ++i) {
+0x00101582	57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+0x00101573	58	        kputchar(buf[i]);
+0x00101576	58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+irq_handler (r=0xc0ea20) at src/kernel/isr.c:144
+144	    if (interrupt_handlers[r->int_no] != NULL) {
+irq_handler (r=0xc0e798) at src/kernel/isr.c:150
+150	    if (r->int_no >= 40) {
+154	    io_write8(0x20, PIC1_COMMAND);
+io_write8 (value=32 ' ', port=32) at src/lib/io.c:3
+3	void io_write8(uint8_t value, uint32_t port) { asm volatile("outb %0, %1" : : "a"(value), "Nd"(port)); }
+irq_handler (r=0xc0ea20) at src/kernel/isr.c:156
+156	    kprintf("Done handling interrupt\n");
+0x00101077 in irq_common_stub ()
+eax            0x303               771
+ecx            0x2a                42
+edx            0x3d5               981
+ebx            0xc0ea20            12642848
+esp            0xc0e794            0xc0e794
+ebp            0x6                 0x6
+esi            0xc0e960            12642656
+edi            0x6                 6
+eip            0x101077            0x101077 <irq_common_stub+24>
+eflags         0x6                 [ IOPL=0 PF ]
+cs             0x8                 8
+ss             0x18                24
+ds             0x10                16
+es             0x10                16
+fs             0x10                16
+gs             0x10                16
+fs_base        0x0                 0
+gs_base        0x0                 0
+k_gs_base      0x0                 0
+cr0            0x11                [ ET PE ]
+cr2            0x0                 0
+cr3            0x0                 [ PDBR=0 PCID=0 ]
+cr4            0x0                 [ ]
+cr8            0x0                 0
+efer           0x0                 [ ]
+xmm0           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+xmm1           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+xmm2           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+xmm3           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+xmm4           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+xmm5           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+xmm6           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+xmm7           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+mxcsr          0x1f80              [ IM DM ZM OM UM PM ]
+Single stepping until exit from function irq_common_stub,
+which has no line number information.
+0x001010db in isr13 ()
+Single stepping until exit from function isr13,
+which has no line number information.
+Remote communication error.  Target disconnected.: Broken pipe.
+
+quit
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x0000fff0 in ?? ()
+Breakpoint 1 at 0x102610: file src/kernel/isr.c, line 141.
+Continuing.
+
+Breakpoint 1, irq_handler (r=0xc0e798) at src/kernel/isr.c:141
+141	void irq_handler(struct registers_t *r) {
+142	    kprintf("Received IRQ %#x\n", r->int_no - IRQ0);
+kprintf (fmt=0x1081bf "Received IRQ %#x\n") at src/kernel/drivers/vga_text.c:49
+49	void kprintf(const char *fmt, ...) {
+51	    va_start(args, fmt);
+53	    uint32_t size = stbsp_vsnprintf(NULL, 0, fmt, args);
+54	    char buf[size + 1];
+55	    stbsp_vsprintf(buf, fmt, args);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+kputchar (c=100 'd') at src/kernel/drivers/vga_text.c:26
+26	void kputchar(char c) {
+0x00106106 in __x86.get_pc_thunk.bx ()
+Single stepping until exit from function __x86.get_pc_thunk.bx,
+which has no line number information.
+kputchar (c=-124 '\204') at src/kernel/drivers/vga_text.c:27
+27	    if (col == cols) {
+38	    if ('\n' == c) {
+42	        fb[line * cols + col] = (bg << 12) | (fg << 8) | c;
+43	        ++col;
+46	    set_cursor_pos(col, line);
+io_write8 (value=15 '\017', port=980) at src/lib/io.c:3
+3	void io_write8(uint8_t value, uint32_t port) { asm volatile("outb %0, %1" : : "a"(value), "Nd"(port)); }
+set_cursor_pos (y=<optimized out>, x=<optimized out>) at src/kernel/drivers/vga_text.c:89
+89	    io_write8((uint8_t) (pos & 0xFF), VGA_CRTC_DATA);
+90	    io_write8(0x0E, VGA_CRTC_INDEX);
+91	    io_write8((uint8_t) ((pos >> 8) & 0xFF), VGA_CRTC_DATA);
+io_write8 (value=2 '\002', port=981) at src/lib/io.c:3
+3	void io_write8(uint8_t value, uint32_t port) { asm volatile("outb %0, %1" : : "a"(value), "Nd"(port)); }
+kprintf (fmt=<optimized out>) at src/kernel/drivers/vga_text.c:57
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+irq_handler (r=0xc0ea20) at src/kernel/isr.c:144
+144	    if (interrupt_handlers[r->int_no] != NULL) {
+irq_handler (r=0xc0e798) at src/kernel/isr.c:150
+150	    if (r->int_no >= 40) {
+154	    io_write8(0x20, PIC1_COMMAND);
+io_write8 (value=32 ' ', port=32) at src/lib/io.c:3
+3	void io_write8(uint8_t value, uint32_t port) { asm volatile("outb %0, %1" : : "a"(value), "Nd"(port)); }
+irq_handler (r=0xc0ea20) at src/kernel/isr.c:156
+156	    kprintf("Done handling interrupt\n");
+0x00101077 in irq_common_stub ()
+Single stepping until exit from function irq_common_stub,
+which has no line number information.
+0x001010db in isr13 ()
+Quit
+
+quit
+Detaching from pid process 1
+Ending remote debugging.
+[Inferior 1 (process 1) detached]
+add symbol table from file "build/soos.bin.debug"
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x0000fff0 in ?? ()
+Breakpoint 1 at 0x10105f
+Continuing.
+
+Breakpoint 1, 0x0010105f in irq_common_stub ()
+Single stepping until exit from function irq_common_stub,
+which has no line number information.
+irq_handler (r=0xc0e798) at src/kernel/isr.c:141
+141	void irq_handler(struct registers_t *r) {
+142	    kprintf("Received IRQ %#x\n", r->int_no - IRQ0);
+kprintf (fmt=0x1081bf "Received IRQ %#x\n") at src/kernel/drivers/vga_text.c:49
+49	void kprintf(const char *fmt, ...) {
+51	    va_start(args, fmt);
+53	    uint32_t size = stbsp_vsnprintf(NULL, 0, fmt, args);
+54	    char buf[size + 1];
+55	    stbsp_vsprintf(buf, fmt, args);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+58	        kputchar(buf[i]);
+57	    for (uint32_t i = 0; i < size; ++i) {
+irq_handler (r=0xc0ea20) at src/kernel/isr.c:144
+144	    if (interrupt_handlers[r->int_no] != NULL) {
+irq_handler (r=0xc0e798) at src/kernel/isr.c:150
+150	    if (r->int_no >= 40) {
+154	    io_write8(0x20, PIC1_COMMAND);
+io_write8 (value=32 ' ', port=32) at src/lib/io.c:3
+3	void io_write8(uint8_t value, uint32_t port) { asm volatile("outb %0, %1" : : "a"(value), "Nd"(port)); }
+irq_handler (r=0xc0ea20) at src/kernel/isr.c:156
+156	    kprintf("Done handling interrupt\n");
+0x00101077 in irq_common_stub ()
+eax            0x303               771
+ecx            0x2a                42
+edx            0x3d5               981
+ebx            0xc0ea20            12642848
+esp            0xc0e794            0xc0e794
+ebp            0x6                 0x6
+esi            0xc0e960            12642656
+edi            0x6                 6
+eip            0x101077            0x101077 <irq_common_stub+24>
+eflags         0x6                 [ IOPL=0 PF ]
+cs             0x8                 8
+ss             0x18                24
+ds             0x10                16
+es             0x10                16
+fs             0x10                16
+gs             0x10                16
+fs_base        0x0                 0
+gs_base        0x0                 0
+k_gs_base      0x0                 0
+cr0            0x11                [ ET PE ]
+cr2            0x0                 0
+cr3            0x0                 [ PDBR=0 PCID=0 ]
+cr4            0x0                 [ ]
+cr8            0x0                 0
+efer           0x0                 [ ]
+xmm0           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+xmm1           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+xmm2           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+xmm3           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+xmm4           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+xmm5           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+xmm6           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+xmm7           {v4_float = {0x0, 0x0, 0x0, 0x0}, v2_double = {0x0, 0x0}, v16_int8 = {0x0 <repeats 16 times>}, v8_int16 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}, v4_int32 = {0x0, 0x0, 0x0, 0x0}, v2_int64 = {0x0, 0x0}, uint128 = 0x0}
+mxcsr          0x1f80              [ IM DM ZM OM UM PM ]
+Stack level 0, frame at 0xc0e798:
+ eip = 0x101077 in irq_common_stub; saved eip = 0xc0e798
+ called by frame at 0xc0e79c
+ Arglist at 0xc0e790, args: 
+ Locals at 0xc0e790, Previous frame's sp is 0xc0e798
+ Saved registers:
+  eip at 0xc0e794
+Invalid number "0x0xc0e79c".
+0xc0e79c:	0x06	0x00	0x00	0x00	0x60	0xe9	0xc0	0x00
+0xc0e7a4:	0x06	0x00
+Quit
+0xc0e7a6:	0x00	0x00	0xbc	0xe7	0xc0	0x00	0x20	0xea
+0xc0e7ae:	0xc0	0x00
+0xc0e7b0:	0xd5	0x03	0x00	0x00	0x76	0x00	0x00	0x00
+0xc0e7b8:	0x02	0x03
+0xc0e7ba:	0x00	0x00	0x20	0x00	0x00	0x00	0x00	0x00
+0xc0e7c2:	0x00	0x00
+0xc0e7c4:	0xf5	0x12	0x10	0x00	0x10	0x00	0x00	0x00
+0xc0e7cc:	0x06	0x02
+0xc0e7ce:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e7d6:	0x00	0x00
+0xc0e7d8:	0x00	0x00	0x00	0x00	0x44	0xd1	0x10	0x00
+0xc0e7e0:	0x00	0x00
+0xc0e7e2:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e7ea:	0x00	0x00
+0xc0e7ec:	0x86	0x80	0x37	0x12	0x03	0x01	0x00	0x00
+0xc0e7f4:	0x02	0x00
+0xc0e7f6:	0x00	0x06	0x00	0x00	0x00	0x00	0x86	0x80
+0xc0e7fe:	0x37	0x12
+0xc0e800:	0x03	0x01	0x00	0x00	0x02	0x00	0x00	0x06
+0xc0e808:	0x00	0x00
+0xc0e80a:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e812:	0x00	0x00
+0xc0e814:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e81c:	0x00	0x00
+0xc0e81e:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e826:	0x00	0x00
+0xc0e828:	0xf4	0x1a	0x00	0x11	0x00	0x00	0x00	0x00
+0xc0e830:	0x00	0x00
+0xc0e832:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e83a:	0x00	0x00
+0xc0e83c:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e844:	0x01	0x00
+0xc0e846:	0x00	0x00	0x00	0x00	0x00	0x00	0x86	0x80
+0xc0e84e:	0x00	0x70
+0xc0e850:	0x03	0x01	0x00	0x02	0x00	0x00	0x01	0x06
+0xc0e858:	0x00	0x00
+0xc0e85a:	0x80	0x00	0x86	0x80	0x00	0x70	0x03	0x01
+0xc0e862:	0x00	0x02
+0xc0e864:	0x00	0x00	0x01	0x06	0x00	0x00	0x80	0x00
+0xc0e86c:	0x00	0x00
+0xc0e86e:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e876:	0x00	0x00
+0xc0e878:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e880:	0x00	0x00
+0xc0e882:	0x00	0x00	0x00	0x00	0x00	0x00	0xf4	0x1a
+0xc0e88a:	0x00	0x11
+0xc0e88c:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e894:	0x00	0x00
+0xc0e896:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e89e:	0x00	0x00
+0xc0e8a0:	0x00	0x00	0x00	0x00	0x01	0x00	0x00	0x00
+0xc0e8a8:	0x01	0x00
+0xc0e8aa:	0x00	0x00	0x86	0x80	0x10	0x70	0x03	0x01
+0xc0e8b2:	0x80	0x02
+0xc0e8b4:	0x00	0x80	0x01	0x01	0x00	0x00	0x00	0x00
+0xc0e8bc:	0x86	0x80
+0xc0e8be:	0x10	0x70	0x03	0x01	0x80	0x02	0x00	0x80
+0xc0e8c6:	0x01	0x01
+0xc0e8c8:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e8d0:	0x00	0x00
+0xc0e8d2:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e8da:	0x00	0x00
+0xc0e8dc:	0x41	0xc0	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e8e4:	0x00	0x00
+0xc0e8e6:	0x00	0x00	0xf4	0x1a	0x00	0x11	0x00	0x00
+0xc0e8ee:	0x00	0x00
+0xc0e8f0:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e8f8:	0x00	0x00
+0xc0e8fa:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e902:	0x00	0x00
+0xc0e904:	0x01	0x00	0x00	0x00	0x03	0x00	0x00	0x00
+0xc0e90c:	0x86	0x80
+0xc0e90e:	0x13	0x71	0x03	0x01	0x80	0x02	0x03	0x00
+0xc0e916:	0x80	0x06
+0xc0e918:	0x00	0x00	0x00	0x00	0x86	0x80	0x13	0x71
+0xc0e920:	0x03	0x01
+0xc0e922:	0x80	0x02	0x03	0x00	0x80	0x06	0x00	0x00
+0xc0e92a:	0x00	0x00
+0xc0e92c:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e934:	0x00	0x00
+0xc0e936:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e93e:	0x00	0x00
+0xc0e940:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e948:	0xf4	0x1a
+0xc0e94a:	0x00	0x11	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e952:	0x00	0x00
+0xc0e954:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e95c:	0x00	0x00
+0xc0e95e:	0x00	0x00	0x00	0x00	0x00	0x00	0x02	0x00
+0xc0e966:	0x00	0x00
+0xc0e968:	0x00	0x00	0x00	0x00	0x34	0x12	0x11	0x11
+0xc0e970:	0x03	0x01
+0xc0e972:	0x00	0x00	0x02	0x00	0x00	0x03	0x00	0x00
+0xc0e97a:	0x00	0x00
+0xc0e97c:	0x34	0x12	0x11	0x11	0x03	0x01	0x00	0x00
+0xc0e984:	0x02	0x00
+0xc0e986:	0x00	0x03	0x00	0x00	0x00	0x00	0x08	0x00
+0xc0e98e:	0x00	0xfd
+0xc0e990:	0x00	0x00	0x00	0x00	0x00	0x00	0xbf	0xfe
+0xc0e998:	0x00	0x00
+0xc0e99a:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e9a2:	0x00	0x00
+0xc0e9a4:	0x00	0x00	0x00	0x00	0xf4	0x1a	0x00	0x11
+0xc0e9ac:	0x00	0x00
+0xc0e9ae:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e9b6:	0x00	0x00
+0xc0e9b8:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e9c0:	0x00	0x00
+0xc0e9c2:	0x00	0x00	0x03	0x00	0x00	0x00	0x00	0x00
+0xc0e9ca:	0x00	0x00
+0xc0e9cc:	0x86	0x80	0x0e	0x10	0x03	0x01	0x00	0x00
+0xc0e9d4:	0x03	0x00
+0xc0e9d6:	0x00	0x02	0x00	0x00	0x00	0x00	0x86	0x80
+0xc0e9de:	0x0e	0x10
+0xc0e9e0:	0x03	0x01	0x00	0x00	0x03	0x00	0x00	0x02
+0xc0e9e8:	0x00	0x00
+0xc0e9ea:	0x00	0x00	0x00	0x00	0xbc	0xfe	0x01	0xc0
+0xc0e9f2:	0x00	0x00
+0xc0e9f4:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0e9fc:	0x00	0x00
+0xc0e9fe:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0ea06:	0x00	0x00
+0xc0ea08:	0xf4	0x1a	0x00	0x11	0x00	0x00	0x00	0x00
+0xc0ea10:	0x00	0x00
+0xc0ea12:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0ea1a:	0x00	0x00
+0xc0ea1c:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0ea24:	0x00	0x00
+0xc0ea26:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0ea2e:	0x00	0x00
+0xc0ea30:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0ea38:	0x00	0x00
+0xc0ea3a:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0ea42:	0x00	0x00
+0xc0ea44:	0x00	0x00	0x00	0x00	0x00	0x00	0x00	0x00
+0xc0ea4c:	0x00	0x00
+Continuing.
+Cannot execute this command while the target is running.
+Use the "interrupt" command to stop the target
+and then try again.

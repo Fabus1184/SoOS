@@ -114,6 +114,6 @@ union BAR pci_read_bar(const struct pci_device *device, uint8_t bar_index);
 
 uint32_t pci_enumerate_devices(struct pci_device *devices, uint32_t max_devices);
 
-void pci_get_description(const struct pci_device *device, char **class_name, char **subclass_name, char **prog_if_name);
+void pci_get_description(const struct pci_device *device, const char **class_name, const char **subclass_name, const char **prog_if_name);
 
 #endif  // SOOS_PCI_H

@@ -29,10 +29,8 @@ void set_plane(uint32_t p);
 
 uint32_t get_fb_seg(void);
 
-void set_cursor_pos(uint16_t x, uint16_t y);
-
 void write_font(uint8_t *buf, uint32_t font_height);
 
-uint8_t reverse_bits(uint8_t arg);
+void set_cursor(uint32_t offset);
 
 #endif  // SOOS_VGA_H

@@ -2,12 +2,19 @@ ENTRY(_start)
  
 SECTIONS
 {
-	. = 1M;
+	. = 0x1000;
 
 	.boot :
 	{
 		*(.multiboot)
 	}
+
+	.pre_kernel_section BLOCK(4K) : ALIGN(4K)
+	{
+		*(.pre_kernel)
+	}
+
+	. = 1M;
 
 	.text BLOCK(4K) : ALIGN(4K)
 	{
