@@ -59,3 +59,4 @@ x86-i686--glibc--stable-2022.08-1/
 build/*
 .vscode/*
 iso/*
+gdb.log
