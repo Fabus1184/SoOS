@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -no-pie -fno-stack-protector -g -ffreestanding -O0 -nostdlib -Wall -Wextra -Werror -march=x86-64 -std=gnu99 -Ilib -Isrc -I/usr/include
+CFLAGS = -m64 -no-pie -fno-stack-protector -g -ffreestanding -O2 -nostdlib -Wall -Wextra -Werror -march=x86-64 -std=gnu99 -Ilib -Isrc -I/usr/include
 SOURCES = $(shell find src -name '*.c')
 ASM_SOURCES = $(shell find src -name '*.asm')
 OBJS = $(patsubst src/%,build/%,$(SOURCES:.c=.o)) 
@@ -19,8 +19,8 @@ build/soos.bin: $(ASMS) $(OBJS)
 	objcopy --strip-debug $@
 
 $(OBJS): $(SOURCES)
-	@mkdir -p $(@D)
-	$(foreach src,$(SOURCES),$(CC) -c $(src) -o $(patsubst src/%,build/%,$(src:.c=.o)) $(CFLAGS) || exit;)
+	$(foreach src,$(SOURCES), mkdir -p `dirname $(patsubst src/%,build/%,$(src:.c=.o))`)
+	$(foreach src,$(SOURCES), $(CC) -c $(src) -o $(patsubst src/%,build/%,$(src:.c=.o)) $(CFLAGS) || exit;)
 
 build/%.o: src/%.asm
 	nasm -f elf64 $^ -o $@

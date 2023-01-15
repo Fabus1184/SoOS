@@ -1,5 +1,5 @@
-#ifndef SOOS_STRING_H
-#define SOOS_STRING_H
+#ifndef HOME_FABIAN_GIT_SOOS_SRC_LIB_STRING_H
+#define HOME_FABIAN_GIT_SOOS_SRC_LIB_STRING_H
 
 #include <lib/memory.h>
 #include <stddef.h>
@@ -11,4 +11,4 @@ char *itoa(size_t n, char *s, uint8_t base);
 
 uint64_t prefix_decimal(uint64_t n, char **prefix);
 
-#endif  // SOOS_STRING_H
+#endif  // HOME_FABIAN_GIT_SOOS_SRC_LIB_STRING_H

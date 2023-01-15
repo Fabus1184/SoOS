@@ -1,5 +1,5 @@
-#ifndef SOOS_PCI_H
-#define SOOS_PCI_H
+#ifndef HOME_FABIAN_GIT_SOOS_SRC_KERNEL_DRIVERS_PCI_H
+#define HOME_FABIAN_GIT_SOOS_SRC_KERNEL_DRIVERS_PCI_H
 
 #include <lib/io.h>
 #include <lib/memory.h>
@@ -22,7 +22,7 @@ struct pci_header_0 {
     uint8_t interrupt_pin;
     uint8_t min_grant;
     uint8_t max_latency;
-};
+} __attribute__((aligned(64)));
 
 struct pci_header_1 {
     uint32_t bar[2];
@@ -46,7 +46,7 @@ struct pci_header_1 {
     uint8_t interrupt_line;
     uint8_t interrupt_pin;
     uint16_t bridge_control;
-};
+} __attribute__((packed));
 
 struct pci_header_2 {
     uint32_t cardbus_socket_register_base_address;
@@ -71,7 +71,7 @@ struct pci_header_2 {
     uint16_t subsystem_vendor_id;
     uint16_t subsystem_id;
     uint32_t legacy_base_address;
-};
+} __attribute__((aligned(64)));
 
 struct __attribute__((packed)) pci_device {
     uint32_t bus;
@@ -96,7 +96,7 @@ struct __attribute__((packed)) pci_device {
         struct pci_header_1 header_1;
         struct pci_header_2 header_2;
     } header;
-};
+} __attribute__((aligned(128)));
 
 union BAR {
     uint64_t address;
@@ -104,7 +104,7 @@ union BAR {
     struct {
         uint8_t type;
         bool prefetchable;
-    } BAR_MEM_SPACE;
+    } __attribute__((aligned(2))) BAR_MEM_SPACE;
     struct {
         bool reserved;
     } BAR_IO_SPACE;
@@ -122,4 +122,4 @@ uint32_t pci_enumerate_devices(struct pci_device *devices, uint32_t max_devices)
 
 void pci_get_description(const struct pci_device *device, const char **class_name, const char **subclass_name, const char **prog_if_name);
 
-#endif  // SOOS_PCI_H
+#endif  // HOME_FABIAN_GIT_SOOS_SRC_KERNEL_DRIVERS_PCI_H

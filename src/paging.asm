@@ -31,17 +31,17 @@ setup_page_tables:
     mov [page_table_l3], eax
 
     mov ecx, 0
-    ; identity map the first 1 GiB of memory
+    ; identity map the first 2GiB
 setup_page_tables_loop:
     mov eax, 0x200000 ; 2MiB
     mul ecx
     or eax, 0b10000011 ; present, writable, huge page
 
     ; write the entry to page table l2
-    mov [page_table_l2 + (ecx * 8)], eax
+    mov [page_table_l2 + ecx * 8], eax
 
     inc ecx
-    cmp ecx, 512
+    cmp ecx, 1024
     jne setup_page_tables_loop
 
     ret

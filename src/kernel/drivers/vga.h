@@ -1,10 +1,8 @@
-#ifndef SOOS_VGA_H
-#define SOOS_VGA_H
+#ifndef HOME_FABIAN_GIT_SOOS_SRC_KERNEL_DRIVERS_VGA_H
+#define HOME_FABIAN_GIT_SOOS_SRC_KERNEL_DRIVERS_VGA_H
 
 #include <lib/io.h>
 #include <lib/memory.h>
-#include <stddef.h>
-#include <stdint.h>
 
 extern uint8_t g_40x25_text[];
 extern uint8_t g_40x50_text[];
@@ -33,4 +31,4 @@ void write_font(uint8_t *buf, uint32_t font_height);
 
 void set_cursor(uint32_t offset);
 
-#endif  // SOOS_VGA_H
+#endif  // HOME_FABIAN_GIT_SOOS_SRC_KERNEL_DRIVERS_VGA_H

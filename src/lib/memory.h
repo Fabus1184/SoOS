@@ -1,5 +1,5 @@
-#ifndef SOOS_MEMORY_H
-#define SOOS_MEMORY_H
+#ifndef HOME_FABIAN_GIT_SOOS_SRC_LIB_MEMORY_H
+#define HOME_FABIAN_GIT_SOOS_SRC_LIB_MEMORY_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -17,4 +17,4 @@ uint32_t memcmp(const void *a, const void *b, size_t size);
 
 bool find(void *array, uint32_t size, uint32_t element_size, void *element);
 
-#endif  // SOOS_MEMORY_H
+#endif  // HOME_FABIAN_GIT_SOOS_SRC_LIB_MEMORY_H

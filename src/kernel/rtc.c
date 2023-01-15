@@ -17,6 +17,7 @@ uint8_t read_rtc_register(uint8_t reg) {
 struct rtc_time get_rtc_time(void) {
     while (update_in_progress()) { /* */
     }
+
     struct rtc_time time = (struct rtc_time){
         .seconds = read_rtc_register(0x00),
         .minutes = read_rtc_register(0x02),

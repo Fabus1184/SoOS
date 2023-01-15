@@ -1,7 +1,5 @@
 [bits 16]
 
-extern error16
-
 section .lowmem
 align 4
 
@@ -67,9 +65,11 @@ high_memory_end:
 error_low_memory:
     mov eax, error_low_memory_msg
     mov byte ch, 0x0C
+    extern error16
     jmp error16
 
 error_high_memory:
     mov eax, error_high_memory_msg
     mov byte ch, 0x0C
+    extern error16
     jmp error16

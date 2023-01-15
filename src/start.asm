@@ -3,7 +3,7 @@
 section .bss
 align 4
 stack32:
-    resb 0x2000
+    resb 0x10000
 stack32_end:
 
 section .text
@@ -133,23 +133,23 @@ protected_mode32_start:
     extern paging_and_long_mode
     call paging_and_long_mode
 
+    ; load 64 bit gdt
+    extern gdt64_descriptor
+    lgdt [gdt64_descriptor]
+
     ; far jump to 64 bit long mode
-    extern GDT_CODE64
-    jmp GDT_CODE64:long_mode_start
+    extern GDT64_CODE
+    jmp GDT64_CODE:long_mode_start
 
 [bits 64]
 long_mode_start:
     ; setup segment registers
-    extern GDT_DATA64
-    mov ax, GDT_DATA64
+    mov ax, 0x0
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
     mov ss, ax
-
-    hlt
-    jmp $
 
     ; transfer control to kernel
     extern kernel_main
