@@ -1,27 +1,26 @@
-[bits 16]
+[bits 32]
 section .lowmem
 align 4
 
-global GDT_CODE16
-global GDT_DATA16
-global GDT_CODE32
-global GDT_DATA32
-global gdt_descriptor
+global gdt16_descriptor
+global gdt32_descriptor
 
-GDT_CODE16 equ gdt_code16 - gdt
-GDT_DATA16 equ gdt_data16 - gdt
-GDT_CODE32 equ gdt_code32 - gdt
-GDT_DATA32 equ gdt_data32 - gdt
+global GDT16_CODE
+global GDT16_DATA
 
-global setup_gdt
-setup_gdt:
-    lgdt [gdt_descriptor]
-    ret
+global GDT32_CODE
+global GDT32_DATA
 
-; gdt with 16 and 32 bit code and data segments
-gdt:
+GDT16_CODE equ gdt16_code - gdt16
+GDT16_DATA equ gdt16_data - gdt16
+
+GDT32_CODE equ gdt32_code - gdt32
+GDT32_DATA equ gdt32_data - gdt32
+
+; gdt with 16 bit code and data segments
+gdt16:
     dq 0
-gdt_code16:
+gdt16_code:
     ; 2 byte limit = 0xFFFF, 2 byte base = 0
     dw 0xFFFF
     dw 0
@@ -33,7 +32,7 @@ gdt_code16:
     db 0b00001111
     ; 1 byte base = 0
     db 0
-gdt_data16:
+gdt16_data:
     ; 2 byte limit = 0xFFFF, 2 byte base = 0
     dw 0xFFFF
     dw 0
@@ -45,19 +44,27 @@ gdt_data16:
     db 0b00001111
     ; 1 byte base = 0
     db 0
-gdt_code32:
+gdt16_end:
+gdt16_descriptor:
+    dw gdt16_end - gdt16 - 1
+    dd gdt16
+
+; gdt with 32 bit code and data segments
+gdt32:
+    dq 0
+gdt32_code:
     ; 2 byte limit = 0xFFFF, 2 byte base = 0
     dw 0xFFFF
     dw 0
     ; 1 byte base = 0
     db 0
     ; present = 1, 2 bit privilege = 0, descriptor type = 1, executable flag = 1, direction flag = 0, read/write flag = 1, accessed flag = 0
-    db 0b10011110
+    db 0b10011010
     ; granularity = 1, size flag = 1, long mode flag = 0, reserved = 0, 1 byte limit = 0xFF
-    db 0b01001111
-    ; 1 byte base
+    db 0b11001111
+    ; 1 byte base = 0
     db 0
-gdt_data32:
+gdt32_data:
     ; 2 byte limit = 0xFFFF, 2 byte base = 0
     dw 0xFFFF
     dw 0
@@ -66,13 +73,13 @@ gdt_data32:
     ; present = 1, 2 bit privilege = 0, descriptor type = 1, executable flag = 0, direction flag = 0, read/write flag = 1, accessed flag = 0
     db 0b10010010
     ; granularity = 1, size flag = 1, long mode flag = 0, reserved = 0, 1 byte limit = 0xFF
-    db 0b01001111
+    db 0b11001111
     ; 1 byte base = 0
     db 0
-gdt_end:
-gdt_descriptor:
-    dw gdt_end - gdt - 1
-    dd gdt
+gdt32_end:
+gdt32_descriptor:
+    dw gdt32_end - gdt32 - 1
+    dd gdt32
 
 [bits 64]
 section .rodata

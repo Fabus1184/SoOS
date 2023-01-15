@@ -44,12 +44,14 @@ void print_memory_map(void) {
     }
 }
 
-void __attribute__((noreturn)) kernel_main(void) {
+void kernel_main(void) {
     init_text_mode();
 
     struct rtc_time time = get_rtc_time();
     kprintf("Hello, world! @ %02hhc.%02hhc.%04hu %02hhc:%02hhc:%02hhc\n", time.day_of_month, time.month, time.year, time.hours, time.minutes,
             time.seconds);
+
+    return;
 
     // print_memory_map();
 

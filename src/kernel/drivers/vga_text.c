@@ -55,18 +55,20 @@ void kputchar(char c) {
 }
 
 void kprintf(const char *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
+    va_list args1, args2;
+    va_start(args1, fmt);
+    va_copy(args2, args1);
 
-    uint32_t size = stbsp_vsnprintf(NULL, 0, fmt, args);
+    uint32_t size = stbsp_vsnprintf(NULL, 0, fmt, args1);
+    va_end(args1);
+
     char buf[size + 1];
-    stbsp_vsprintf(buf, fmt, args);
+    stbsp_vsprintf(buf, fmt, args2);
+    va_end(args2);
 
     for (uint32_t i = 0; i < size; ++i) {
         kputchar(buf[i]);
     }
-
-    va_end(args);
 }
 
 void kprintf_color(uint8_t fg, uint8_t bg, const char *fmt, ...) {

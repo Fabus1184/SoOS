@@ -9,7 +9,7 @@ SECTIONS
 		*(.multiboot)
 	}
 
-	.lowmem BLOCK(4K) : ALIGN(4K)
+	.lowmem :
 	{
 		*(.lowmem)
 	}
