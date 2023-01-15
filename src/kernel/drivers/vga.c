@@ -139,8 +139,8 @@ void set_plane(uint32_t p) {
 VGA framebuffer is at A000:0000, B000:0000, or B800:0000
 depending on bits in GC 6
 *****************************************************************************/
-uint32_t get_fb_seg(void) {
-    uint32_t seg;
+uint64_t get_fb_seg(void) {
+    uint64_t seg;
 
     io_write8(6, VGA_GC_INDEX);
     seg = io_read8(VGA_GC_DATA);

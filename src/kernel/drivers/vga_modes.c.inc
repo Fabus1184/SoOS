@@ -1,4 +1,3 @@
-
 uint8_t g_40x25_text[] = {
     /* MISC */
     0x67,

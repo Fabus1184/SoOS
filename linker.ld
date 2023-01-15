@@ -9,9 +9,9 @@ SECTIONS
 		*(.multiboot)
 	}
 
-	.pre_kernel_section BLOCK(4K) : ALIGN(4K)
+	.lowmem BLOCK(4K) : ALIGN(4K)
 	{
-		*(.pre_kernel)
+		*(.lowmem)
 	}
 
 	. = 1M;

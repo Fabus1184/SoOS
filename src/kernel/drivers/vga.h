@@ -27,7 +27,7 @@ void write_regs(uint8_t *regs);
 
 void set_plane(uint32_t p);
 
-uint32_t get_fb_seg(void);
+uint64_t get_fb_seg(void);
 
 void write_font(uint8_t *buf, uint32_t font_height);
 

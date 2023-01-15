@@ -52,8 +52,8 @@ void __attribute__((noreturn)) kernel_main(void) {
 
     print_memory_map();
 
-    isr_install();
-    enable_interrupts();
+    // isr_install();
+    // enable_interrupts();
 
     struct pci_device devices[64];
     uint32_t device_count = pci_enumerate_devices(devices, 64);

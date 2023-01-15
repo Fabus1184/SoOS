@@ -6,6 +6,7 @@
 ; these are defined in isr.c
 [extern isr_handler]
 [extern irq_handler]
+[bits 32]
 
 ; ------------------------------
 ; ISR handler

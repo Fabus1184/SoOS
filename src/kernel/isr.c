@@ -79,7 +79,7 @@ void enable_interrupts(void) { asm volatile("sti"); }
 
 void isr_install() {
     for (uint8_t i = 0; i < 32; ++i) {
-        set_idt_gate(i, (uint32_t) isrs[i * 2]);
+        set_idt_gate(i, (uint64_t) isrs[i * 2]);
     }
 
     uint8_t mask1 = io_read8(PIC1_DATA);
@@ -97,22 +97,22 @@ void isr_install() {
     io_write8(mask1, PIC1_DATA);
     io_write8(mask2, PIC2_DATA);
 
-    set_idt_gate(32, (uint32_t) irq0);
-    set_idt_gate(33, (uint32_t) irq1);
-    set_idt_gate(34, (uint32_t) irq2);
-    set_idt_gate(35, (uint32_t) irq3);
-    set_idt_gate(36, (uint32_t) irq4);
-    set_idt_gate(37, (uint32_t) irq5);
-    set_idt_gate(38, (uint32_t) irq6);
-    set_idt_gate(39, (uint32_t) irq7);
-    set_idt_gate(40, (uint32_t) irq8);
-    set_idt_gate(41, (uint32_t) irq9);
-    set_idt_gate(42, (uint32_t) irq10);
-    set_idt_gate(43, (uint32_t) irq11);
-    set_idt_gate(44, (uint32_t) irq12);
-    set_idt_gate(45, (uint32_t) irq13);
-    set_idt_gate(46, (uint32_t) irq14);
-    set_idt_gate(47, (uint32_t) irq15);
+    set_idt_gate(32, (uint64_t) irq0);
+    set_idt_gate(33, (uint64_t) irq1);
+    set_idt_gate(34, (uint64_t) irq2);
+    set_idt_gate(35, (uint64_t) irq3);
+    set_idt_gate(36, (uint64_t) irq4);
+    set_idt_gate(37, (uint64_t) irq5);
+    set_idt_gate(38, (uint64_t) irq6);
+    set_idt_gate(39, (uint64_t) irq7);
+    set_idt_gate(40, (uint64_t) irq8);
+    set_idt_gate(41, (uint64_t) irq9);
+    set_idt_gate(42, (uint64_t) irq10);
+    set_idt_gate(43, (uint64_t) irq11);
+    set_idt_gate(44, (uint64_t) irq12);
+    set_idt_gate(45, (uint64_t) irq13);
+    set_idt_gate(46, (uint64_t) irq14);
+    set_idt_gate(47, (uint64_t) irq15);
 
     set_idt();
 

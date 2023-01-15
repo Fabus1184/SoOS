@@ -45,6 +45,9 @@ union BAR pci_read_bar(const struct pci_device *device, uint8_t bar_index) {
 
     union BAR ret;
     const uint32_t *bar = NULL;
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
     switch (device->header_type) {
         case 0:
             bar = device->header.header_0.bar;
@@ -53,6 +56,7 @@ union BAR pci_read_bar(const struct pci_device *device, uint8_t bar_index) {
             bar = device->header.header_1.bar;
             break;
     }
+#pragma GCC diagnostic pop
 
     ret.is_mem = (0 == (bar[0] & 0x1U));
 

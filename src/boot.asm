@@ -4,10 +4,9 @@
 %define MAGIC 0x1BADB002
 %define CHECKSUM -(MAGIC + FLAGS)
 
-[BITS 32]
-[extern kernel_main]
-[extern pre_kernel]
+[bits 32]
 
+; Multiboot header
 section .multiboot
 align 4
 header_start:
@@ -16,27 +15,10 @@ header_start:
 	dd      CHECKSUM
 header_end:
 
-section .bss
-align 16
-kernel_stack:
-    resb	32768
-kernel_stack_end:
-
 section .text
 align 4
 
-global _start
-_start:
-    call    pre_kernel
-
-global boot_kernel
-boot_kernel:
-	mov     esp, kernel_stack_end
-    call    kernel_main
-    hlt
-_1:
-    jmp     _1
-
+; gdt functions for gdt.c
 global gdt_flush
 [extern gp] 
 gdt_flush:
