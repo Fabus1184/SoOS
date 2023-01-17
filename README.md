@@ -6,4 +6,4 @@ x86 operating system from scratch written in C and assembly using
 
 ## Current state (subject to change):
 
-![image](https://user-images.githubusercontent.com/43907020/212491476-bb9e5f6f-8a93-4eeb-9099-3c99fce372bd.png)
+![image](https://user-images.githubusercontent.com/43907020/213022784-0a183b19-4ad3-4e73-936e-823ad2481b00.png)
