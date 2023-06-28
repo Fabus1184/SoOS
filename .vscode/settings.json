@@ -3,5 +3,6 @@
     "rust-analyzer.check.extraArgs": [
         "--target",
         "x86_64-unknown-none"
-    ]
+    ],
+    "rust-analyzer.showUnlinkedFileNotification": false
 }
