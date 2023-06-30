@@ -2,7 +2,11 @@ use core::alloc::GlobalAlloc;
 
 use limine::LimineMemmapResponse;
 
-static mut MEMMAP: [Option<MemmapEntry>; 64] = [None; 64];
+static mut MEMMAP: [Option<MemmapEntry>; 64] = [Some(MemmapEntry {
+    base: 0x1000,
+    len: 0x10000,
+    typ: MemmapEntryType::Usable,
+}); 64];
 static mut ALLOCATED: Option<*mut u8> = None;
 
 pub struct SoosAllocator {}
@@ -35,7 +39,7 @@ struct MemmapEntry {
     typ: MemmapEntryType,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
 enum MemmapEntryType {
     Usable = 0,
@@ -50,13 +54,17 @@ enum MemmapEntryType {
 
 unsafe impl GlobalAlloc for SoosAllocator {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        if let Some(allocated) = ALLOCATED {
-            ALLOCATED = Some(allocated.add(layout.size()));
-            allocated
-        } else {
-            ALLOCATED = Some((MEMMAP[0].unwrap().base as usize + layout.size()) as *mut u8);
-            MEMMAP[0].unwrap().base as *mut u8
-        }
+        let ret = ALLOCATED.unwrap_or_else(|| {
+            MEMMAP
+                .iter()
+                .flatten()
+                .filter(|x| x.typ == MemmapEntryType::Usable)
+                .reduce(|a, b| if a.len > b.len { a } else { b })
+                .map(|x| x.base)
+                .expect("No usable memory found!") as *mut u8
+        });
+        ALLOCATED = Some(ret.add(layout.size()));
+        ret
     }
 
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: core::alloc::Layout) {}

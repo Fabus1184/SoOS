@@ -2,6 +2,6 @@ clean:
 	rm SoOS.iso || true
 
 run:
-	cargo build
+	cargo build --release
 	./iso.sh
-	qemu-system-x86_64 -cdrom SoOS.iso -d guest_errors -m 4G -d cpu_reset
+	qemu-system-x86_64 -cdrom SoOS.iso -d guest_errors -m 8G -d cpu_reset

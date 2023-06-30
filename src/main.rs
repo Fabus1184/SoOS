@@ -1,45 +1,86 @@
 #![no_std]
 #![no_main]
+#![feature(abi_x86_interrupt)]
 
 extern crate alloc;
 
 mod allocator;
-mod display;
 mod font;
+mod idt;
+mod isr;
 mod panic;
+mod term;
 
-use core::{arch::asm, fmt::Write};
+use alloc::format;
+use core::arch::asm;
 
-use alloc::string::String;
-
-use crate::allocator::ALLOCATOR;
-
-pub static FRAMEBUFFER_REQUEST: limine::LimineFramebufferRequest =
-    limine::LimineFramebufferRequest::new(0);
+use crate::{allocator::ALLOCATOR, term::TERM};
 
 static MEMMAP_REQUEST: limine::LimineMemmapRequest = limine::LimineMemmapRequest::new(0);
 
+static BOOT_TIME: limine::LimineBootTimeRequest = limine::LimineBootTimeRequest::new(0);
+
+static BOOT_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(0);
+
 #[no_mangle]
-extern "C" fn _start() -> ! {
-    let response = FRAMEBUFFER_REQUEST.get_response().get().unwrap();
-
-    if response.framebuffer_count == 0 {
-        panic!("No framebuffer found!");
-    }
-
-    let fb = &response.framebuffers()[0];
-    let mut term = display::Term::new(fb);
-    term.fg = 0xFF00FF00;
-    term.println("Hello, world!");
-
-    let memmap = MEMMAP_REQUEST.get_response().get().unwrap();
+unsafe extern "C" fn _start() -> ! {
+    let memmap = MEMMAP_REQUEST
+        .get_response()
+        .get()
+        .expect("Failed to get memmap!");
     unsafe { ALLOCATOR.load_limine_memmap(memmap) };
 
-    let mut s = String::new();
-    write!(s, "Memory map: {:#?}", memmap).unwrap();
-    term.println(&s);
+    TERM.fg = 0xFF00FF00;
+    printk!("Hello, world!\n");
 
-    panic!("HIer wallah PANIK wallah");
+    let boot_time = BOOT_TIME
+        .get_response()
+        .get()
+        .map(|x| x.boot_time)
+        .unwrap_or(0);
+    printk!(
+        "Boot time: {:?}\n",
+        chrono::NaiveDateTime::from_timestamp_opt(boot_time as i64, 0).expect("Invalid time!")
+    );
+
+    unsafe {
+        let boot_info = BOOT_INFO
+            .get_response()
+            .get()
+            .expect("Failed to get boot info!");
+        let name = boot_info
+            .name
+            .as_ptr()
+            .and_then(|x| core::ffi::CStr::from_ptr(x).to_str().ok())
+            .unwrap_or("<failed to get name>");
+        let version = boot_info
+            .version
+            .as_ptr()
+            .and_then(|x| core::ffi::CStr::from_ptr(x).to_str().ok())
+            .unwrap_or("<failed to get version>");
+        printk!(
+            "Bootloader: {} {} rev {}\n",
+            name,
+            version,
+            boot_info.revision
+        );
+    }
+
+    {
+        printk!("memory map:\n");
+        for i in 0..memmap.entry_count {
+            let entry = unsafe { memmap.entries.as_ptr().wrapping_offset(i as isize).read() };
+            printk!(
+                "  base: {:#16x}, len: {:#14x}, type: {:?}\n",
+                entry.base,
+                entry.len,
+                entry.typ
+            );
+        }
+    }
+
+    idt::load_idt();
+    printk!("IDT loaded!\n");
 
     loop {
         unsafe { asm!("nop") };
