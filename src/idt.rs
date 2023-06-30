@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-use crate::isr::ISRS;
+use crate::{isr::ISRS, printk};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -51,6 +51,7 @@ pub fn load_idt() {
     };
 
     unsafe {
+        asm!("cli");
         asm!("lidt [{}]", in(reg) &idt);
         asm!("sti");
     }

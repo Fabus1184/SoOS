@@ -11,29 +11,37 @@ mod isr;
 mod panic;
 mod term;
 
-use alloc::format;
 use core::arch::asm;
 
 use crate::{allocator::ALLOCATOR, term::TERM};
 
 static MEMMAP_REQUEST: limine::LimineMemmapRequest = limine::LimineMemmapRequest::new(0);
 
-static BOOT_TIME: limine::LimineBootTimeRequest = limine::LimineBootTimeRequest::new(0);
+static BOOT_TIME_REQUEST: limine::LimineBootTimeRequest = limine::LimineBootTimeRequest::new(0);
 
-static BOOT_INFO: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(0);
+static BOOT_INFO_REQUEST: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(0);
+
+static PAGING_INFO_REQUEST: limine::Limine5LevelPagingRequest =
+    limine::Limine5LevelPagingRequest::new(0);
 
 #[no_mangle]
 unsafe extern "C" fn _start() -> ! {
+    TERM.fg = 0xFF00FF00;
+
+    {
+        let ptr = PAGING_INFO_REQUEST.get_response().as_ptr();
+        printk!("Paging info: {:#?}\n", ptr);
+    }
+
     let memmap = MEMMAP_REQUEST
         .get_response()
         .get()
         .expect("Failed to get memmap!");
     unsafe { ALLOCATOR.load_limine_memmap(memmap) };
 
-    TERM.fg = 0xFF00FF00;
     printk!("Hello, world!\n");
 
-    let boot_time = BOOT_TIME
+    let boot_time = BOOT_TIME_REQUEST
         .get_response()
         .get()
         .map(|x| x.boot_time)
@@ -44,7 +52,7 @@ unsafe extern "C" fn _start() -> ! {
     );
 
     unsafe {
-        let boot_info = BOOT_INFO
+        let boot_info = BOOT_INFO_REQUEST
             .get_response()
             .get()
             .expect("Failed to get boot info!");

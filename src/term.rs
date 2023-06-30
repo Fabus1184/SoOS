@@ -45,12 +45,15 @@ impl Term {
         }
     }
 
-    pub fn clear(&self) {
+    pub fn clear(&mut self) {
         for x in 0..self.framebuffer.width {
             for y in 0..self.framebuffer.height {
                 self.blit(x, y, self.bg);
             }
         }
+
+        self.x = 0;
+        self.y = 0;
     }
 
     pub fn blit(&self, x: u64, y: u64, color: u32) {
