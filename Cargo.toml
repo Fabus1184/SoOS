@@ -7,7 +7,8 @@ edition = "2021"
 
 [dependencies]
 chrono = { version = "0.4.26", default-features = false, features = ["alloc"] }
-limine = "0.1.10"
+#limine = "0.1.10"
+limine = { path = "../limine-rs"}
 once_cell = { version = "1.18.0", default-features = false }
 raw-cpuid = "11.0.1"
 x86_64 = { version = "0.14.10", default-features = false, features = ["abi_x86_interrupt", "instructions"] }

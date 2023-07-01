@@ -16,22 +16,26 @@ mod time;
 
 use core::arch::asm;
 
+use alloc::string::ToString;
+
 use crate::{allocator::ALLOCATOR, term::TERM};
 
-static MEMMAP_REQUEST: limine::LimineMemmapRequest = limine::LimineMemmapRequest::new(0);
+static MEMMAP_REQUEST: limine::MemmapRequest = limine::MemmapRequest::new(0);
 
-static BOOT_INFO_REQUEST: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(0);
+static BOOT_INFO_REQUEST: limine::BootInfoRequest = limine::BootInfoRequest::new(0);
 
-static PAGING_INFO_REQUEST: limine::Limine5LevelPagingRequest =
-    limine::Limine5LevelPagingRequest::new(0);
+static PAGING_INFO_REQUEST: limine::Level5PagingRequest = limine::Level5PagingRequest::new(0);
 
 #[no_mangle]
 unsafe extern "C" fn _start() -> ! {
     TERM.fg = 0xFF00FF00;
 
     {
-        let ptr = PAGING_INFO_REQUEST.get_response().as_ptr();
-        printk!("Paging info: {:#?}\n", ptr);
+        let paging = PAGING_INFO_REQUEST
+            .get_response()
+            .get()
+            .expect("Failed to get paging info!");
+        printk!("paging info: {:#?}\n", paging);
     }
 
     time::i8253::TIMER0.init(
@@ -88,19 +92,29 @@ unsafe extern "C" fn _start() -> ! {
     }
 
     idt::load_idt();
-    printk!("IDT loaded!\n");
-
     pic::init();
-    printk!("APIC initialized!\n");
 
     {
         let cpuid = raw_cpuid::CpuId::new();
-        printk!("Vendor: {:?}\n", cpuid.get_vendor_info());
-        printk!("Feature Info: {:?}\n", cpuid.get_feature_info());
         printk!(
-            "Extended Feature Info: {:?}\n",
-            cpuid.get_extended_processor_and_feature_identifiers()
+            "Vendor: {:?}\n",
+            cpuid
+                .get_vendor_info()
+                .map(|x| x.as_str().to_string())
+                .unwrap_or("<unknown>".to_string())
         );
+        printk!(
+            "Name: {:?}\n",
+            cpuid
+                .get_processor_brand_string()
+                .map(|s| s.as_str().to_string())
+                .unwrap_or("<unknown>".to_string())
+        );
+    }
+
+    loop {
+        time::i8253::TIMER0.sleep(2000);
+        printk!("Time: {}\n", time::rtc::get_time());
     }
 
     loop {

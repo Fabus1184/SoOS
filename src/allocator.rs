@@ -1,6 +1,6 @@
 use core::alloc::GlobalAlloc;
 
-use limine::LimineMemmapResponse;
+use limine::MemmapResponse;
 
 static mut MEMMAP: [Option<MemmapEntry>; 64] = [Some(MemmapEntry {
     base: 0x1000,
@@ -12,7 +12,7 @@ static mut ALLOCATED: Option<*mut u8> = None;
 pub struct SoosAllocator {}
 
 impl SoosAllocator {
-    pub fn load_limine_memmap(&mut self, memmap: &LimineMemmapResponse) {
+    pub fn load_limine_memmap(&mut self, memmap: &MemmapResponse) {
         unsafe {
             for (e, i) in MEMMAP.iter_mut().zip(0..memmap.entry_count) {
                 let ptr = memmap.entries.as_ptr().wrapping_offset(i as isize).read();

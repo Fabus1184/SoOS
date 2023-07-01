@@ -3,7 +3,7 @@ use x86_64::{
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
 };
 
-use crate::printk;
+use crate::{asm::inb, printk};
 
 pub static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
@@ -50,7 +50,11 @@ fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, error_code: Option<u64
 
     match irq {
         0 => unsafe { crate::time::i8253::TIMER0.tick() },
-        _ => {}
+        1 => unsafe {
+            let scancode = inb(0x60);
+            printk!("scancode: {}\n", scancode);
+        },
+        _ => printk!("irq: {}\n", irq),
     }
 
     crate::pic::eoi(irq);

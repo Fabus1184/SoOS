@@ -1,7 +1,6 @@
 use crate::font::{FONT_HEIGHT, FONT_WIDTH};
 
-pub static FRAMEBUFFER_REQUEST: limine::LimineFramebufferRequest =
-    limine::LimineFramebufferRequest::new(0);
+pub static FRAMEBUFFER_REQUEST: limine::FramebufferRequest = limine::FramebufferRequest::new(0);
 
 pub static mut TERM: once_cell::unsync::Lazy<Term> = once_cell::unsync::Lazy::new(|| {
     let fbr = FRAMEBUFFER_REQUEST
@@ -17,7 +16,7 @@ pub struct Term {
     y: usize,
     pub fg: u32,
     pub bg: u32,
-    framebuffer: &'static limine::LimineFramebuffer,
+    framebuffer: &'static limine::Framebuffer,
 }
 
 const FONT_SCALE: u64 = 2;
@@ -27,7 +26,6 @@ unsafe impl Sync for Term {}
 #[macro_export]
 macro_rules! printk {
     ($($arg:tt)*) => {
-        #[allow(unused_unsafe)]
         unsafe {
             crate::term::TERM.print(&alloc::format!($($arg)*));
         }
@@ -35,7 +33,7 @@ macro_rules! printk {
 }
 
 impl Term {
-    pub fn new(fb: &'static limine::LimineFramebuffer) -> Term {
+    pub fn new(fb: &'static limine::Framebuffer) -> Term {
         Term {
             x: 0,
             y: 0,
