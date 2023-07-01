@@ -1,23 +1,24 @@
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]
+#![feature(asm_const)]
 
 extern crate alloc;
 
 mod allocator;
-mod apic;
+mod asm;
 mod font;
 mod idt;
 mod panic;
+mod pic;
 mod term;
+mod time;
 
 use core::arch::asm;
 
 use crate::{allocator::ALLOCATOR, term::TERM};
 
 static MEMMAP_REQUEST: limine::LimineMemmapRequest = limine::LimineMemmapRequest::new(0);
-
-static BOOT_TIME_REQUEST: limine::LimineBootTimeRequest = limine::LimineBootTimeRequest::new(0);
 
 static BOOT_INFO_REQUEST: limine::LimineBootInfoRequest = limine::LimineBootInfoRequest::new(0);
 
@@ -33,6 +34,14 @@ unsafe extern "C" fn _start() -> ! {
         printk!("Paging info: {:#?}\n", ptr);
     }
 
+    time::i8253::TIMER0.init(
+        100,
+        time::i8253::Channel::CH0,
+        time::i8253::AccessMode::LoHiByte,
+        time::i8253::OperatingMode::RateGenerator,
+        time::i8253::BCDMode::Binary,
+    );
+
     let memmap = MEMMAP_REQUEST
         .get_response()
         .get()
@@ -40,16 +49,7 @@ unsafe extern "C" fn _start() -> ! {
     unsafe { ALLOCATOR.load_limine_memmap(memmap) };
 
     printk!("Hello, world!\n");
-
-    let boot_time = BOOT_TIME_REQUEST
-        .get_response()
-        .get()
-        .map(|x| x.boot_time)
-        .unwrap_or(0);
-    printk!(
-        "Boot time: {:?}\n",
-        chrono::NaiveDateTime::from_timestamp_opt(boot_time as i64, 0).expect("Invalid time!")
-    );
+    printk!("Time: {}\n", time::rtc::get_time());
 
     unsafe {
         let boot_info = BOOT_INFO_REQUEST
@@ -90,7 +90,7 @@ unsafe extern "C" fn _start() -> ! {
     idt::load_idt();
     printk!("IDT loaded!\n");
 
-    apic::init();
+    pic::init();
     printk!("APIC initialized!\n");
 
     {

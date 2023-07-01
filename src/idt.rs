@@ -1,4 +1,9 @@
-use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
+use x86_64::{
+    set_general_handler,
+    structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
+};
+
+use crate::printk;
 
 pub static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
@@ -34,8 +39,21 @@ pub fn load_idt() {
         IDT.vmm_communication_exception
             .set_handler_fn(vmm_communication_exception_handler);
 
+        set_general_handler!(&mut IDT, irq_handler, 32..=255);
+
         IDT.load();
     }
+}
+
+fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, error_code: Option<u64>) {
+    let irq = irq - 32;
+
+    match irq {
+        0 => unsafe { crate::time::i8253::TIMER0.tick() },
+        _ => {}
+    }
+
+    crate::pic::eoi(irq);
 }
 
 extern "x86-interrupt" fn alignment_check_handler(stack_frame: InterruptStackFrame, err: u64) {
