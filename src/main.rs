@@ -5,9 +5,9 @@
 extern crate alloc;
 
 mod allocator;
+mod apic;
 mod font;
 mod idt;
-mod isr;
 mod panic;
 mod term;
 
@@ -89,6 +89,19 @@ unsafe extern "C" fn _start() -> ! {
 
     idt::load_idt();
     printk!("IDT loaded!\n");
+
+    apic::init();
+    printk!("APIC initialized!\n");
+
+    {
+        let cpuid = raw_cpuid::CpuId::new();
+        printk!("Vendor: {:?}\n", cpuid.get_vendor_info());
+        printk!("Feature Info: {:?}\n", cpuid.get_feature_info());
+        printk!(
+            "Extended Feature Info: {:?}\n",
+            cpuid.get_extended_processor_and_feature_identifiers()
+        );
+    }
 
     loop {
         unsafe { asm!("nop") };
