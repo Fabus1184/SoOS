@@ -1,4 +1,4 @@
-use crate::font::{FONT_HEIGHT, FONT_WIDTH};
+use crate::font::{self, FONT_HEIGHT, FONT_WIDTH};
 
 pub static FRAMEBUFFER_REQUEST: limine::FramebufferRequest = limine::FramebufferRequest::new(0);
 
@@ -26,6 +26,7 @@ unsafe impl Sync for Term {}
 #[macro_export]
 macro_rules! printk {
     ($($arg:tt)*) => {
+        #[allow(unused_unsafe)]
         unsafe {
             crate::term::TERM.print(&alloc::format!($($arg)*));
         }
@@ -88,7 +89,7 @@ impl Term {
 
             for x in 0..FONT_WIDTH {
                 for y in 0..FONT_HEIGHT {
-                    let byte = crate::font::FONT[c as usize - 32][FONT_WIDTH * (y / 8) + x];
+                    let byte = font::FONT[c as usize - 32][FONT_WIDTH * (y / 8) + x];
                     let bit = (byte >> (y % 8)) & 1;
                     let color = if bit == 1 { self.fg } else { self.bg };
                     self.blit(

@@ -3,7 +3,7 @@ use x86_64::{
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
 };
 
-use crate::{asm::inb, printk};
+use crate::{asm::inb, driver, printk};
 
 pub static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
@@ -40,16 +40,21 @@ pub fn load_idt() {
             .set_handler_fn(vmm_communication_exception_handler);
 
         set_general_handler!(&mut IDT, irq_handler, 32..=255);
+        set_general_handler!(&mut IDT, syscall_handler, 0x80);
 
         IDT.load();
     }
 }
 
-fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, error_code: Option<u64>) {
+fn syscall_handler(stack_frame: InterruptStackFrame, _irq: u8, _error_code: Option<u64>) {
+    printk!("SYSCALL\n{:#?}\n", stack_frame);
+}
+
+fn irq_handler(_stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u64>) {
     let irq = irq - 32;
 
     match irq {
-        0 => unsafe { crate::time::i8253::TIMER0.tick() },
+        0 => unsafe { driver::i8253::TIMER0.tick() },
         1 => unsafe {
             let scancode = inb(0x60);
             printk!("scancode: {}\n", scancode);

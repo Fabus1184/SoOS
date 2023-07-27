@@ -2,6 +2,7 @@ use crate::asm::{inb, outb};
 
 #[repr(u8)]
 #[derive(Copy, Clone)]
+#[allow(dead_code)]
 pub enum Channel {
     CH0 = 0b00000000,
     CH1 = 0b01000000,
@@ -10,6 +11,7 @@ pub enum Channel {
 
 #[repr(u8)]
 #[derive(Copy, Clone)]
+#[allow(dead_code)]
 pub enum AccessMode {
     Latch = 0b00000000,
     LoByte = 0b00010000,
@@ -19,6 +21,7 @@ pub enum AccessMode {
 
 #[repr(u8)]
 #[derive(Copy, Clone)]
+#[allow(dead_code)]
 pub enum OperatingMode {
     InterruptOnTerminalCount = 0b00000000,
     HardwareRetriggerableOneShot = 0b00000010,
@@ -30,6 +33,7 @@ pub enum OperatingMode {
 
 #[repr(u8)]
 #[derive(Copy, Clone)]
+#[allow(dead_code)]
 pub enum BCDMode {
     Binary = 0b00000000,
     BCD = 0b00000001,

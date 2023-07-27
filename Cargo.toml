@@ -1,5 +1,5 @@
 [package]
-name = "SoOS"
+name = "soos"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,8 +7,11 @@ edition = "2021"
 
 [dependencies]
 chrono = { version = "0.4.26", default-features = false, features = ["alloc"] }
-#limine = "0.1.10"
-limine = { path = "../limine-rs"}
+limine = "0.1.11"
+linked_list_allocator = "0.10.5"
 once_cell = { version = "1.18.0", default-features = false }
 raw-cpuid = "11.0.1"
-x86_64 = { version = "0.14.10", default-features = false, features = ["abi_x86_interrupt", "instructions"] }
+x86_64 = { version = "0.14.10", default-features = false, features = [
+    "abi_x86_interrupt",
+    "instructions",
+] }
