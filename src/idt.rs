@@ -3,7 +3,7 @@ use x86_64::{
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
 };
 
-use crate::{asm::inb, driver, printk};
+use crate::{asm::inb, driver, printk, syscall::Syscall};
 
 pub static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
@@ -39,15 +39,22 @@ pub fn load_idt() {
         IDT.vmm_communication_exception
             .set_handler_fn(vmm_communication_exception_handler);
 
-        set_general_handler!(&mut IDT, irq_handler, 32..=255);
-        set_general_handler!(&mut IDT, syscall_handler, 0x80);
+        set_general_handler!(&mut IDT, irq_handler, 32..=47);
+
+        IDT[0x80]
+            .set_handler_fn(syscall_handler)
+            .set_privilege_level(x86_64::PrivilegeLevel::Ring3);
 
         IDT.load();
     }
 }
 
-fn syscall_handler(stack_frame: InterruptStackFrame, _irq: u8, _error_code: Option<u64>) {
-    printk!("SYSCALL\n{:#?}\n", stack_frame);
+extern "x86-interrupt" fn syscall_handler(stack_frame: InterruptStackFrame) {
+    unsafe {
+        Syscall::from_stack_ptr(stack_frame.stack_pointer.as_ptr())
+            .expect("failed to read syscall from registers")
+            .execute();
+    };
 }
 
 fn irq_handler(_stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u64>) {

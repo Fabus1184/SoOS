@@ -14,10 +14,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     unsafe {
         PANIC_STRING = String::from_raw_parts(0x10000 as *mut u8, 0, 2048);
 
-        TERM.bg = 0xFF32292F;
         TERM.fg = 0xFFF87060;
-        TERM.clear();
-        TERM.println("Allahkaputtputt!!");
+        TERM.println("\nAllahkaputtputt!!");
         write!(&mut PANIC_STRING, "{}", info).unwrap();
         TERM.println(&PANIC_STRING);
     };

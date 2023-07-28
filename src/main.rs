@@ -7,30 +7,32 @@ extern crate alloc;
 
 mod asm;
 mod driver;
+mod elf;
 mod font;
 mod idt;
 mod kernel;
 mod pic;
 mod stuff;
+mod syscall;
 mod term;
 
-use alloc::string::ToString;
-use core::{arch::asm, slice};
+use core::arch::asm;
+
 use x86_64::{
-    instructions::{self, interrupts, tables},
-    registers::{
-        rflags::{self, RFlags},
-        segmentation::{Segment, CS, DS, ES, FS, GS, SS},
-    },
+    instructions::tables,
+    registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
     structures::{
-        gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
-        paging::{FrameAllocator, Mapper},
+        gdt::{Descriptor, GlobalDescriptorTable},
         tss::TaskStateSegment,
     },
-    PrivilegeLevel, VirtAddr,
+    VirtAddr,
 };
 
-use crate::term::TERM;
+use crate::{
+    kernel::paging::{self, SoosFrameAllocator, SoosPaging},
+    stuff::memmap::SoosMemmap,
+    term::TERM,
+};
 
 static MEMMAP_REQUEST: limine::MemmapRequest = limine::MemmapRequest::new(0);
 
@@ -41,13 +43,14 @@ static PAGING_MODE_REQUEST: limine::PagingModeRequest =
 
 static HHDM_REQUEST: limine::HhdmRequest = limine::HhdmRequest::new(0);
 
-static mut STACK1: [u8; 4096] = [0; 4096];
+const KERNEL_STACK_SIZE: usize = 4192 * 100;
+static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
 
 #[no_mangle]
 unsafe extern "C" fn _start() -> ! {
     static mut TSS: TaskStateSegment = TaskStateSegment::new();
     TSS.privilege_stack_table = [
-        VirtAddr::new(STACK1.as_mut_ptr() as u64 + STACK1.len() as u64),
+        VirtAddr::new(KERNEL_STACK.as_mut_ptr() as u64 + KERNEL_STACK.len() as u64),
         VirtAddr::zero(),
         VirtAddr::zero(),
     ];
@@ -90,13 +93,17 @@ unsafe extern "C" fn _start() -> ! {
         .get()
         .expect("Failed to get memmap!");
 
-    let memmap = stuff::memmap::SoosMemmap::from(limine_memmap);
+    let memmap = SoosMemmap::from(limine_memmap);
 
-    let frame_allocator = kernel::paging::SoosFrameAllocator::new(memmap);
-    let mut paging = kernel::paging::SoosPaging::new(hhdm.offset, frame_allocator);
+    let mut frame_allocator = SoosFrameAllocator::get_or_init_with_current_pagetable(memmap);
+
+    let kernel_page_table = paging::current_page_table();
+    let mut kernel_paging = SoosPaging::offset_page_table(hhdm.offset, &mut *kernel_page_table);
 
     // no allocation before this point!
-    kernel::allocator::init_kernel_heap(&mut paging).expect("Failed to init kernel heap!");
+    kernel::allocator::init_kernel_heap(&mut kernel_paging, &mut frame_allocator)
+        .expect("Failed to init kernel heap!");
+    printk!("kernel heap initialized\n");
 
     idt::load_idt();
     pic::init();
@@ -108,6 +115,10 @@ unsafe extern "C" fn _start() -> ! {
         driver::i8253::OperatingMode::RateGenerator,
         driver::i8253::BCDMode::Binary,
     );
+
+    let (rsp, rip) = elf::load(&mut kernel_paging, frame_allocator);
+
+    printk!("rsp: {:x}, rip: {:x}\n", rsp, rip);
 
     asm!(
         "cli",
@@ -124,56 +135,10 @@ unsafe extern "C" fn _start() -> ! {
         "iretq",
         uds = in(reg) ((uds.index() * 8) | 3),
         ucs = in(reg) ((ucs.index() * 8) | 3),
-        stack = in(reg) 0xabcdef,
+        stack = in(reg) rsp,
         rflags = in(reg) 0x200,
-        userland_function = in(reg) 0x1234,
-        options(noreturn),
+        userland_function = in(reg) rip,
     );
 
-    printk!("Hello, world!\n");
-    printk!("Time: {}\n", driver::rtc::get_time());
-
-    let boot_info = BOOT_INFO_REQUEST
-        .get_response()
-        .get()
-        .expect("Failed to get boot info!");
-    let name = boot_info
-        .name
-        .as_ptr()
-        .and_then(|x| core::ffi::CStr::from_ptr(x).to_str().ok())
-        .unwrap_or("<failed to get name>");
-    let version = boot_info
-        .version
-        .as_ptr()
-        .and_then(|x| core::ffi::CStr::from_ptr(x).to_str().ok())
-        .unwrap_or("<failed to get version>");
-    printk!(
-        "Bootloader: {} {} rev {}\n",
-        name,
-        version,
-        boot_info.revision
-    );
-
-    {
-        let cpuid = raw_cpuid::CpuId::new();
-        printk!(
-            "Vendor: {:?}\n",
-            cpuid
-                .get_vendor_info()
-                .map(|x| x.as_str().to_string())
-                .unwrap_or("<unknown>".to_string())
-        );
-        printk!(
-            "Name: {:?}\n",
-            cpuid
-                .get_processor_brand_string()
-                .map(|s| s.as_str().to_string())
-                .unwrap_or("<unknown>".to_string())
-        );
-    }
-
-    loop {
-        driver::i8253::TIMER0.sleep(2000);
-        printk!("Time: {}\n", driver::rtc::get_time());
-    }
+    loop {}
 }
