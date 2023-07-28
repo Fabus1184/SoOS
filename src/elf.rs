@@ -1,4 +1,4 @@
-use elf_rs::{Elf, ElfFile, ProgramType};
+use elf_rs::{Elf, ElfFile, ProgramHeaderFlags, ProgramType};
 use x86_64::{
     structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
     VirtAddr,
@@ -6,8 +6,8 @@ use x86_64::{
 
 use crate::kernel::paging::SoosPaging;
 
-const USERLAND_STACK_ADDR: u64 = 0xFFFF_BBBB_0000_0000;
-const USERLAND_CODE_ADDR: u64 = 0xFFFF_FFAA_0000_0000;
+const USERLAND_STACK_ADDR: u64 = 0x0000_0BBB_0000_0000;
+const USERLAND_CODE_ADDR: u64 = 0x0000_0FAA_0000_0000;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -23,13 +23,13 @@ impl Elf64Rela {
     }
 }
 
+const USERSPACE_STACK_PAGES: u64 = 100;
+
 pub fn load(
     kernel_paging: &mut SoosPaging,
     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
 ) -> (u64, u64) {
-    const STACK_PAGES: u64 = 100;
-
-    for i in 0..STACK_PAGES {
+    for i in 0..USERSPACE_STACK_PAGES {
         let stack_page = Page::containing_address(VirtAddr::new(USERLAND_STACK_ADDR + (i * 4096)));
         let frame = frame_allocator
             .allocate_frame()
@@ -63,6 +63,13 @@ pub fn load(
                 USERLAND_CODE_ADDR + ph.vaddr() + ph.memsz(),
             ));
 
+            let mut flags = PageTableFlags::PRESENT
+                | PageTableFlags::USER_ACCESSIBLE
+                | PageTableFlags::WRITABLE;
+            if !ph.flags().contains(ProgramHeaderFlags::EXECUTE) {
+                flags |= PageTableFlags::NO_EXECUTE;
+            }
+
             for page in Page::range_inclusive(start_page, end_page) {
                 let frame = frame_allocator
                     .allocate_frame()
@@ -71,14 +78,7 @@ pub fn load(
                 unsafe {
                     kernel_paging
                         .offset_page_table
-                        .map_to(
-                            page,
-                            frame,
-                            PageTableFlags::PRESENT
-                                | PageTableFlags::WRITABLE
-                                | PageTableFlags::USER_ACCESSIBLE,
-                            frame_allocator,
-                        )
+                        .map_to(page, frame, flags, frame_allocator)
                         .expect("Failed to map page!")
                         .flush()
                 };
@@ -137,14 +137,19 @@ pub fn load(
                 USERLAND_CODE_ADDR + ph.vaddr() + ph.memsz(),
             ));
 
+            let mut flags = PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE;
+            if ph.flags().contains(ProgramHeaderFlags::WRITE) {
+                flags |= PageTableFlags::WRITABLE;
+            }
+            if !ph.flags().contains(ProgramHeaderFlags::EXECUTE) {
+                flags |= PageTableFlags::NO_EXECUTE;
+            }
+
             for page in Page::range_inclusive(start_page, end_page) {
                 unsafe {
                     kernel_paging
                         .offset_page_table
-                        .update_flags(
-                            page,
-                            PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE,
-                        )
+                        .update_flags(page, flags)
                         .expect("Failed to map page!")
                         .flush()
                 };
@@ -154,7 +159,7 @@ pub fn load(
     });
 
     (
-        USERLAND_STACK_ADDR + (STACK_PAGES * 4096),
+        USERLAND_STACK_ADDR + (USERSPACE_STACK_PAGES * 4096),
         USERLAND_CODE_ADDR + elf.entry_point(),
     )
 }

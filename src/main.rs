@@ -119,7 +119,6 @@ unsafe extern "C" fn _start() -> ! {
     let (rsp, rip) = elf::load(&mut kernel_paging, frame_allocator);
 
     printk!("rsp: {:x}, rip: {:x}\n", rsp, rip);
-
     asm!(
         "cli",
         "mov ax, {uds:x}",
