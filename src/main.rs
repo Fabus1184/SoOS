@@ -11,13 +11,14 @@ mod elf;
 mod font;
 mod idt;
 mod kernel;
+mod logger;
 mod pic;
+mod process;
 mod stuff;
 mod syscall;
 mod term;
 
-use core::arch::asm;
-
+use log::info;
 use x86_64::{
     instructions::tables,
     registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
@@ -30,6 +31,7 @@ use x86_64::{
 
 use crate::{
     kernel::paging::{self, SoosFrameAllocator, SoosPaging},
+    process::Process,
     stuff::memmap::SoosMemmap,
     term::TERM,
 };
@@ -103,7 +105,10 @@ unsafe extern "C" fn _start() -> ! {
     // no allocation before this point!
     kernel::allocator::init_kernel_heap(&mut kernel_paging, &mut frame_allocator)
         .expect("Failed to init kernel heap!");
-    printk!("kernel heap initialized\n");
+
+    log::set_logger(&logger::KernelLogger {}).expect("Failed to set logger!");
+    log::set_max_level(log::LevelFilter::Trace);
+    info!("Logger initialized! {}", 2);
 
     idt::load_idt();
     pic::init();
@@ -116,28 +121,21 @@ unsafe extern "C" fn _start() -> ! {
         driver::i8253::BCDMode::Binary,
     );
 
-    let (rsp, rip) = elf::load(&mut kernel_paging, frame_allocator);
-
-    printk!("rsp: {:x}, rip: {:x}\n", rsp, rip);
-    asm!(
-        "cli",
-        "mov ax, {uds:x}",
-        "mov ds, ax",
-        "mov es, ax",
-        "mov fs, ax",
-        "mov gs, ax",
-        "push {uds:r}",
-        "push {stack:r}",
-        "push {rflags:r}",
-        "push {ucs:r}",
-        "push {userland_function:r}",
-        "iretq",
-        uds = in(reg) ((uds.index() * 8) | 3),
-        ucs = in(reg) ((ucs.index() * 8) | 3),
-        stack = in(reg) rsp,
-        rflags = in(reg) 0x200,
-        userland_function = in(reg) rip,
+    let mut process = Process::from_elf_bytes(
+        include_bytes!("../userspace/main.elf"),
+        hhdm.offset,
+        kernel_page_table,
+        frame_allocator,
+        ucs,
+        uds,
+        VirtAddr::new(0x0000_5555_ABBA_0000),
+        VirtAddr::new(0x0000_5555_ACDC_0000),
+        100,
     );
 
-    loop {}
+    info!("process loaded!");
+
+    process.run();
 }
+
+static mut CURRENT_PROCESS: Option<&

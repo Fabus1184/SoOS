@@ -6,9 +6,6 @@ use x86_64::{
 
 use crate::kernel::paging::SoosPaging;
 
-const USERLAND_STACK_ADDR: u64 = 0x0000_0BBB_0000_0000;
-const USERLAND_CODE_ADDR: u64 = 0x0000_0FAA_0000_0000;
-
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 struct Elf64Rela {
@@ -23,45 +20,18 @@ impl Elf64Rela {
     }
 }
 
-const USERSPACE_STACK_PAGES: u64 = 100;
-
 pub fn load(
-    kernel_paging: &mut SoosPaging,
+    paging: &mut SoosPaging,
     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
-) -> (u64, u64) {
-    for i in 0..USERSPACE_STACK_PAGES {
-        let stack_page = Page::containing_address(VirtAddr::new(USERLAND_STACK_ADDR + (i * 4096)));
-        let frame = frame_allocator
-            .allocate_frame()
-            .expect("Failed to allocate frame!");
-        unsafe {
-            kernel_paging
-                .offset_page_table
-                .map_to(
-                    stack_page,
-                    frame,
-                    PageTableFlags::PRESENT
-                        | PageTableFlags::WRITABLE
-                        | PageTableFlags::USER_ACCESSIBLE
-                        | PageTableFlags::NO_EXECUTE,
-                    frame_allocator,
-                )
-                .expect("Failed to map page!")
-                .flush()
-        };
-    }
-
-    const ELF_BYTES: &'static [u8] = include_bytes!("../userspace/main.elf");
-
-    let elf = Elf::from_bytes(ELF_BYTES).expect("Failed to parse ELF!");
+    bytes: &[u8],
+    code_address: VirtAddr,
+) -> VirtAddr {
+    let elf = Elf::from_bytes(bytes).expect("Failed to parse ELF!");
 
     elf.program_header_iter().for_each(|ph| match ph.ph_type() {
         ProgramType::LOAD => {
-            let start_page =
-                Page::containing_address(VirtAddr::new(USERLAND_CODE_ADDR + ph.vaddr()));
-            let end_page = Page::containing_address(VirtAddr::new(
-                USERLAND_CODE_ADDR + ph.vaddr() + ph.memsz(),
-            ));
+            let start_page = Page::containing_address(code_address + ph.vaddr());
+            let end_page = Page::containing_address(code_address + ph.vaddr() + ph.memsz());
 
             let mut flags = PageTableFlags::PRESENT
                 | PageTableFlags::USER_ACCESSIBLE
@@ -76,7 +46,7 @@ pub fn load(
                     .expect("Failed to allocate frame!");
 
                 unsafe {
-                    kernel_paging
+                    paging
                         .offset_page_table
                         .map_to(page, frame, flags, frame_allocator)
                         .expect("Failed to map page!")
@@ -85,9 +55,9 @@ pub fn load(
             }
 
             unsafe {
-                core::ptr::copy(
-                    ELF_BYTES.as_ptr().add(ph.offset() as usize),
-                    (USERLAND_CODE_ADDR + ph.vaddr()) as *mut u8,
+                core::ptr::copy::<u8>(
+                    bytes.as_ptr().add(ph.offset() as usize),
+                    (code_address + ph.vaddr()).as_mut_ptr(),
                     ph.filesz() as usize,
                 )
             };
@@ -113,12 +83,14 @@ pub fn load(
                     Elf64Rela::from_bytes(entry.try_into().expect("Failed to get entry!"))
                 };
 
-                unsafe { *((USERLAND_CODE_ADDR + entry.offset) as *mut u64) += USERLAND_CODE_ADDR };
+                unsafe {
+                    *((code_address + entry.offset).as_mut_ptr::<u64>()) += code_address.as_u64()
+                };
             }
         }
         _ => {
             /* printk!(
-                "Ignoring section header: {:?}\n",
+                "Ignoring section header: {:?}",
                 sh.section_name()
                     .expect("Failed to get name!")
                     .into_iter()
@@ -130,12 +102,8 @@ pub fn load(
 
     elf.program_header_iter().for_each(|ph| match ph.ph_type() {
         ProgramType::LOAD => {
-            let start_page = Page::<Size4KiB>::containing_address(VirtAddr::new(
-                USERLAND_CODE_ADDR + ph.vaddr(),
-            ));
-            let end_page = Page::containing_address(VirtAddr::new(
-                USERLAND_CODE_ADDR + ph.vaddr() + ph.memsz(),
-            ));
+            let start_page = Page::<Size4KiB>::containing_address(code_address + ph.vaddr());
+            let end_page = Page::containing_address(code_address + ph.vaddr() + ph.memsz());
 
             let mut flags = PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE;
             if ph.flags().contains(ProgramHeaderFlags::WRITE) {
@@ -147,7 +115,7 @@ pub fn load(
 
             for page in Page::range_inclusive(start_page, end_page) {
                 unsafe {
-                    kernel_paging
+                    paging
                         .offset_page_table
                         .update_flags(page, flags)
                         .expect("Failed to map page!")
@@ -158,8 +126,5 @@ pub fn load(
         _ => {}
     });
 
-    (
-        USERLAND_STACK_ADDR + (USERSPACE_STACK_PAGES * 4096),
-        USERLAND_CODE_ADDR + elf.entry_point(),
-    )
+    code_address + elf.entry_point()
 }

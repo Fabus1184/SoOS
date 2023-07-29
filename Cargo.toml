@@ -10,6 +10,7 @@ chrono = { version = "0.4.26", default-features = false, features = ["alloc"] }
 elf_rs = "0.3.0"
 limine = "0.1.11"
 linked_list_allocator = "0.10.5"
+log = "0.4.19"
 once_cell = { version = "1.18.0", default-features = false }
 raw-cpuid = "11.0.1"
 x86_64 = { version = "0.14.10", default-features = false, features = [

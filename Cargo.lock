@@ -78,6 +78,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "log"
+version = "0.4.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b06a4cde4c0f271a446782e3eff8de789548ce57dbc8eca9292c27f4a42004b4"
+
+[[package]]
 name = "num-traits"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -121,6 +127,7 @@ dependencies = [
  "elf_rs",
  "limine",
  "linked_list_allocator",
+ "log",
  "once_cell",
  "raw-cpuid",
  "x86_64",

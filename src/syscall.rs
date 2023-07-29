@@ -1,10 +1,10 @@
 use alloc::{format, string::String};
-
-use crate::printk;
+use log::info;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Syscall {
     Print(*const i8),
+    Sleep(u64),
 }
 
 impl Syscall {
@@ -22,7 +22,10 @@ impl Syscall {
         match self {
             Self::Print(ptr) => {
                 let cstr = unsafe { core::ffi::CStr::from_ptr(ptr) };
-                printk!("syscall print: ({:?}) {:?}\n", ptr, cstr);
+                info!("syscall print: ({:?}) {:?}", ptr, cstr);
+            }
+            Self::Sleep(ms) => {
+                info!("syscall sleep: {:?}", ms);
             }
         }
     }

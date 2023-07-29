@@ -26,6 +26,16 @@ impl<'a> SoosPaging<'a> {
             unsafe { OffsetPageTable::new(page_table, VirtAddr::new(phys_memory_offset)) };
         Self { offset_page_table }
     }
+
+    pub unsafe fn load(&mut self) {
+        let flags = Cr3::read().1;
+        Cr3::write(
+            PhysFrame::containing_address(PhysAddr::new(
+                self.offset_page_table.level_4_table() as *const _ as u64
+            )),
+            flags,
+        );
+    }
 }
 
 const MAX_USABLE_FRAMES: usize = 1 << 24;

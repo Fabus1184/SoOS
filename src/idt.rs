@@ -1,9 +1,10 @@
+use log::info;
 use x86_64::{
     set_general_handler,
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
 };
 
-use crate::{asm::inb, driver, printk, syscall::Syscall};
+use crate::{asm::inb, driver, syscall::Syscall};
 
 pub static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
@@ -64,9 +65,9 @@ fn irq_handler(_stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u
         0 => unsafe { driver::i8253::TIMER0.tick() },
         1 => unsafe {
             let scancode = inb(0x60);
-            printk!("scancode: {}\n", scancode);
+            info!("scancode: {}", scancode);
         },
-        _ => printk!("irq: {}\n", irq),
+        _ => info!("irq: {}", irq),
     }
 
     crate::pic::eoi(irq);
@@ -74,34 +75,34 @@ fn irq_handler(_stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u
 
 extern "x86-interrupt" fn alignment_check_handler(stack_frame: InterruptStackFrame, err: u64) {
     panic!(
-        "EXCEPTION: ALIGNMENT CHECK\n{:#?}\n Error code: {}",
+        "EXCEPTION: ALIGNMENT CHECK {:#?}\n Error code: {}",
         stack_frame, err
     );
 }
 
 extern "x86-interrupt" fn bound_range_exceeded_handler(stack_frame: InterruptStackFrame) {
-    panic!("EXCEPTION: BOUND RANGE EXCEEDED\n{:#?}\n", stack_frame);
+    panic!("EXCEPTION: BOUND RANGE EXCEEDED {:#?}\n", stack_frame);
 }
 
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
-    panic!("EXCEPTION: BREAKPOINT\n{:#?}\n", stack_frame);
+    panic!("EXCEPTION: BREAKPOINT {:#?}\n", stack_frame);
 }
 
 extern "x86-interrupt" fn debug_handler(stack_frame: InterruptStackFrame) {
-    panic!("EXCEPTION: DEBUG\n{:#?}\n", stack_frame);
+    panic!("EXCEPTION: DEBUG {:#?}\n", stack_frame);
 }
 
 extern "x86-interrupt" fn device_not_available_handler(stack_frame: InterruptStackFrame) {
-    panic!("EXCEPTION: DEVICE NOT AVAILABLE\n{:#?}\n", stack_frame);
+    panic!("EXCEPTION: DEVICE NOT AVAILABLE {:#?}\n", stack_frame);
 }
 
 extern "x86-interrupt" fn divide_error_handler(stack_frame: InterruptStackFrame) {
-    panic!("EXCEPTION: DIVIDE ERROR\n{:#?}\n", stack_frame);
+    panic!("EXCEPTION: DIVIDE ERROR {:#?}\n", stack_frame);
 }
 
 extern "x86-interrupt" fn double_fault_handler(stack_frame: InterruptStackFrame, err: u64) -> ! {
     panic!(
-        "EXCEPTION: DOUBLE FAULT\n{:#?}\n Error code: {}",
+        "EXCEPTION: DOUBLE FAULT {:#?}\n Error code: {}",
         stack_frame, err
     );
 }
@@ -111,32 +112,32 @@ extern "x86-interrupt" fn general_protection_fault_handler(
     err: u64,
 ) {
     panic!(
-        "EXCEPTION: GENERAL PROTECTION FAULT\n{:#?}\n Error code: {}",
+        "EXCEPTION: GENERAL PROTECTION FAULT {:#?}\n Error code: {}",
         stack_frame, err
     );
 }
 
 extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
-    panic!("EXCEPTION: INVALID OPCODE\n{:#?}\n", stack_frame);
+    panic!("EXCEPTION: INVALID OPCODE {:#?}\n", stack_frame);
 }
 
 extern "x86-interrupt" fn invalid_tss_handler(stack_frame: InterruptStackFrame, err: u64) {
     panic!(
-        "EXCEPTION: INVALID TSS\n{:#?}\n Error code: {}",
+        "EXCEPTION: INVALID TSS {:#?}\n Error code: {}",
         stack_frame, err
     );
 }
 
 extern "x86-interrupt" fn machine_check_handler(stack_frame: InterruptStackFrame) -> ! {
-    panic!("EXCEPTION: MACHINE CHECK\n{:#?}\n", stack_frame);
+    panic!("EXCEPTION: MACHINE CHECK {:#?}\n", stack_frame);
 }
 
 extern "x86-interrupt" fn non_maskable_interrupt_handler(stack_frame: InterruptStackFrame) {
-    panic!("EXCEPTION: NON MASKABLE INTERRUPT\n{:#?}\n", stack_frame);
+    panic!("EXCEPTION: NON MASKABLE INTERRUPT {:#?}\n", stack_frame);
 }
 
 extern "x86-interrupt" fn overflow_handler(stack_frame: InterruptStackFrame) {
-    panic!("EXCEPTION: OVERFLOW\n{:#?}\n", stack_frame);
+    panic!("EXCEPTION: OVERFLOW {:#?}\n", stack_frame);
 }
 
 extern "x86-interrupt" fn page_fault_handler(
@@ -144,38 +145,38 @@ extern "x86-interrupt" fn page_fault_handler(
     err: PageFaultErrorCode,
 ) {
     panic!(
-        "EXCEPTION: PAGE FAULT\n{:#?}\n Error code: {:?}",
+        "EXCEPTION: PAGE FAULT {:#?}\n Error code: {:?}",
         stack_frame, err
     );
 }
 
 extern "x86-interrupt" fn security_exception_handler(stack_frame: InterruptStackFrame, err: u64) {
     panic!(
-        "EXCEPTION: SECURITY EXCEPTION\n{:#?}\n Error code: {}",
+        "EXCEPTION: SECURITY EXCEPTION {:#?}\n Error code: {}",
         stack_frame, err
     );
 }
 
 extern "x86-interrupt" fn segment_not_present_handler(stack_frame: InterruptStackFrame, err: u64) {
     panic!(
-        "EXCEPTION: SEGMENT NOT PRESENT\n{:#?}\n Error code: {}",
+        "EXCEPTION: SEGMENT NOT PRESENT {:#?}\n Error code: {}",
         stack_frame, err
     );
 }
 
 extern "x86-interrupt" fn simd_floating_point_handler(stack_frame: InterruptStackFrame) {
-    panic!("EXCEPTION: SIMD FLOATING POINT\n{:#?}\n", stack_frame);
+    panic!("EXCEPTION: SIMD FLOATING POINT {:#?}\n", stack_frame);
 }
 
 extern "x86-interrupt" fn stack_segment_fault_handler(stack_frame: InterruptStackFrame, err: u64) {
     panic!(
-        "EXCEPTION: STACK SEGMENT FAULT\n{:#?}\n Error code: {}",
+        "EXCEPTION: STACK SEGMENT FAULT {:#?}\n Error code: {}",
         stack_frame, err
     );
 }
 
 extern "x86-interrupt" fn virtualization_handler(stack_frame: InterruptStackFrame) {
-    panic!("EXCEPTION: VIRTUALIZATION\n{:#?}\n", stack_frame);
+    panic!("EXCEPTION: VIRTUALIZATION {:#?}\n", stack_frame);
 }
 
 extern "x86-interrupt" fn vmm_communication_exception_handler(
@@ -183,7 +184,7 @@ extern "x86-interrupt" fn vmm_communication_exception_handler(
     err: u64,
 ) {
     panic!(
-        "EXCEPTION: VMM COMMUNICATION EXCEPTION\n{:#?}\n Error code: {}",
+        "EXCEPTION: VMM COMMUNICATION EXCEPTION {:#?}\n Error code: {}",
         stack_frame, err
     );
 }

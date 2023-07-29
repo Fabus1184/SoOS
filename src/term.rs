@@ -23,16 +23,6 @@ const FONT_SCALE: u64 = 2;
 
 unsafe impl Sync for Term {}
 
-#[macro_export]
-macro_rules! printk {
-    ($($arg:tt)*) => {
-        #[allow(unused_unsafe)]
-        unsafe {
-            crate::term::TERM.print(&alloc::format!($($arg)*));
-        }
-    };
-}
-
 impl Term {
     pub fn new(fb: &'static limine::Framebuffer) -> Term {
         Term {
