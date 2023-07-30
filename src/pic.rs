@@ -39,8 +39,4 @@ pub fn init() {
         outb(0x21, 0x00);
         outb(0xA1, 0x00);
     }
-
-    unsafe {
-        asm!("sti");
-    }
 }

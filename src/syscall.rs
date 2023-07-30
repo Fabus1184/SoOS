@@ -1,5 +1,5 @@
 use alloc::{format, string::String};
-use log::info;
+use log::{info, trace};
 
 use crate::SCHEDULER;
 
@@ -29,9 +29,12 @@ impl Syscall {
             }
             Self::Sleep(ms) => {
                 info!("syscall sleep: {:?}", ms);
-                unsafe SCHEDULER.try_lock().map(|mut scheduler| unsafe {
-                    scheduler.sleep(ms);
-                });
+                unsafe {
+                    SCHEDULER
+                        .try_lock()
+                        .map(|mut s| (&mut **s).sleep(ms))
+                        .unwrap_or_else(|| trace!("failed to lock scheduler"));
+                };
             }
         }
     }

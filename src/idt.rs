@@ -1,4 +1,4 @@
-use log::info;
+use log::{info, trace};
 use x86_64::{
     set_general_handler,
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
@@ -52,8 +52,10 @@ pub fn load_idt() {
 
 extern "x86-interrupt" fn syscall_handler(stack_frame: InterruptStackFrame) {
     unsafe {
-        (&mut *SCHEDULER.expect("Scheduler not initialized!"))
-            .update_current_process_stack(&stack_frame)
+        SCHEDULER
+            .try_lock()
+            .map(|mut s| (&mut **s).update_current_process_stack(&stack_frame))
+            .unwrap_or_else(|| trace!("failed to lock scheduler"));
     };
 
     unsafe {
@@ -62,7 +64,15 @@ extern "x86-interrupt" fn syscall_handler(stack_frame: InterruptStackFrame) {
             .execute();
     };
 
-    unsafe { (&mut *SCHEDULER.expect("Scheduler not initialized!")).run() }
+    unsafe {
+        SCHEDULER
+            .try_lock()
+            .map(|mut s| {
+                (&mut **s).run();
+                panic!("scheduler returned after syscall");
+            })
+            .unwrap_or_else(|| trace!("failed to lock scheduler"));
+    };
 }
 
 fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u64>) {
@@ -74,8 +84,10 @@ fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u6
     };
 
     unsafe {
-        (&mut *SCHEDULER.expect("Scheduler not initialized!"))
-            .update_current_process_stack(&stack_frame)
+        SCHEDULER
+            .try_lock()
+            .map(|mut s| (&mut **s).update_current_process_stack(&stack_frame))
+            .unwrap_or_else(|| trace!("failed to lock scheduler"));
     };
 
     let irq = irq - 32;
@@ -83,7 +95,10 @@ fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u6
     match irq {
         0 => unsafe {
             driver::i8253::TIMER0.tick();
-            (&mut *SCHEDULER.expect("Scheduler not initialized!")).timer_tick()
+            SCHEDULER
+                .try_lock()
+                .map(|mut s| (&mut **s).timer_tick())
+                .unwrap_or_else(|| trace!("failed to lock scheduler"));
         },
         1 => unsafe {
             let scancode = inb(0x60);
@@ -94,7 +109,12 @@ fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u6
 
     crate::pic::eoi(irq);
 
-    unsafe { (&mut *SCHEDULER.expect("Scheduler not initialized!")).run() }
+    unsafe {
+        SCHEDULER
+            .try_lock()
+            .map(|mut s| (&mut **s).run())
+            .unwrap_or_else(|| trace!("failed to lock scheduler"));
+    };
 }
 
 extern "x86-interrupt" fn alignment_check_handler(stack_frame: InterruptStackFrame, err: u64) {

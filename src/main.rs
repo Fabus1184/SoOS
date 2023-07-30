@@ -118,7 +118,7 @@ unsafe extern "C" fn _start() -> ! {
     .expect("Failed to init kernel heap!");
 
     log::set_logger(&logger::KernelLogger {}).expect("Failed to set logger!");
-    log::set_max_level(log::LevelFilter::Trace);
+    log::set_max_level(log::LevelFilter::Debug);
     info!("Logger initialized!");
 
     idt::load_idt();
@@ -133,7 +133,7 @@ unsafe extern "C" fn _start() -> ! {
     );
 
     let mut scheduler = SoosScheduler::new();
-    SCHEDULER = Some(&mut scheduler as *mut SoosScheduler);
+    *SCHEDULER.lock() = &mut scheduler as *mut SoosScheduler;
 
     let process = Process::from_elf_bytes(
         include_bytes!("../userspace/main.elf"),
@@ -153,8 +153,12 @@ unsafe extern "C" fn _start() -> ! {
         .expect("Kernel paging not initialized!");
     info!("Kernel paging loaded!");
 
-    scheduler.schedule(process);
-    scheduler.run();
+    (&mut **SCHEDULER.lock()).schedule(process);
+
+    info!("Scheduler: {:?}", scheduler);
+
+    core::arch::asm!("sti");
+    (&mut **SCHEDULER.lock()).run();
 
     panic!("Scheduler returned!");
 }
