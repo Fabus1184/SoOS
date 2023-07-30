@@ -1,20 +1,23 @@
 use alloc::vec::Vec;
-use log::{info, trace};
+use log::{debug, info, trace};
 use x86_64::structures::idt::InterruptStackFrame;
 
-use crate::process::{Pid, Process, ProcessState, WaitingState};
+use crate::{
+    process::{Pid, Process, ProcessState, WaitingState},
+    spinlock::Spinlock,
+};
 
 #[derive(Debug)]
 pub struct SoosScheduler<'a> {
     processes: Vec<Process<'a>>,
-    current_process: Option<Pid>,
+    current_process_pid: Option<Pid>,
 }
 
 impl<'a> SoosScheduler<'a> {
     pub fn new() -> Self {
         Self {
             processes: Vec::new(),
-            current_process: None,
+            current_process_pid: None,
         }
     }
 
@@ -23,11 +26,27 @@ impl<'a> SoosScheduler<'a> {
         self.processes.push(process);
     }
 
-    pub unsafe fn run(&mut self) {
+    pub unsafe fn run_unlock(&mut self, spinlock: &mut Spinlock<*mut Self>) {
+        debug!("Running scheduler...");
+
         if self.processes.is_empty() {
-            trace!("No processes to run!");
+            debug!("No processes to run!");
             return;
         }
+
+        if self.current_process_pid.is_some() {
+            let current_process = self
+                .processes
+                .iter_mut()
+                .find(|p| p.pid == self.current_process_pid.unwrap())
+                .unwrap();
+
+            if current_process.state == ProcessState::Running {
+                current_process.state = ProcessState::Ready;
+            }
+        }
+
+        self.processes.rotate_left(1);
 
         while self.processes.first().unwrap().state != ProcessState::Ready {
             trace!(
@@ -38,18 +57,23 @@ impl<'a> SoosScheduler<'a> {
             self.processes.rotate_left(1);
         }
 
-        self.current_process = Some(self.processes.first().unwrap().pid);
+        self.current_process_pid = Some(self.processes.first().unwrap().pid);
 
-        trace!("Running process {:?}...", self.current_process.unwrap());
+        debug!("Running process {:?}...", self.current_process_pid.unwrap());
 
-        unsafe { self.processes.first_mut().unwrap().run() };
+        unsafe {
+            self.processes
+                .first_mut()
+                .unwrap()
+                .run(|| spinlock.unlock())
+        };
     }
 
     pub unsafe fn sleep(&mut self, ms: i64) {
         trace!("Sleeping current process for {}ms...", ms);
         self.processes
             .iter_mut()
-            .find(|p| p.pid == self.current_process.expect("No current process!"))
+            .find(|p| p.pid == self.current_process_pid.expect("No current process!"))
             .expect("Current process not found!")
             .state = ProcessState::Waiting(WaitingState::Timer(ms));
     }
@@ -72,10 +96,10 @@ impl<'a> SoosScheduler<'a> {
     }
 
     pub fn update_current_process_stack(&mut self, stack_frame: &InterruptStackFrame) {
-        if self.current_process.is_some() {
+        if self.current_process_pid.is_some() {
             self.processes
                 .iter_mut()
-                .find(|p| p.pid == self.current_process.expect("No current process!"))
+                .find(|p| p.pid == self.current_process_pid.expect("No current process!"))
                 .expect("Current process not found!")
                 .stack = **stack_frame;
         }

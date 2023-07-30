@@ -3,7 +3,7 @@ clean:
 
 run:
 	cd userspace && make clean && make && cd ..
-	cargo build
+	cargo build --release
 	./iso.sh
 	qemu-system-x86_64 -cpu qemu64,+la57 -cdrom SoOS.iso -d guest_errors -m 8G -d cpu_reset -M smm=off -s 
 

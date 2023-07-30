@@ -32,7 +32,10 @@ impl Syscall {
                 unsafe {
                     SCHEDULER
                         .try_lock()
-                        .map(|mut s| (&mut **s).sleep(ms))
+                        .map(|s| {
+                            (&mut **s).sleep(ms);
+                            SCHEDULER.unlock();
+                        })
                         .unwrap_or_else(|| trace!("failed to lock scheduler"));
                 };
             }

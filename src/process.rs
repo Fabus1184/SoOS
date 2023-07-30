@@ -1,7 +1,7 @@
 use core::arch::asm;
 
 use alloc::collections::BTreeSet;
-use log::trace;
+use log::{debug, trace};
 use x86_64::{
     structures::{
         gdt::SegmentSelector,
@@ -124,15 +124,20 @@ impl<'a> Process<'a> {
         }
     }
 
-    pub unsafe fn run(&mut self) -> ! {
+    pub unsafe fn run<F>(&mut self, mut atomic_op: F) -> !
+    where
+        F: FnMut(),
+    {
         trace!("Disabling interrupts...");
         asm!("cli");
+
+        atomic_op();
 
         trace!("Loading paging...");
         self.paging.load();
         trace!("Paging loaded!");
 
-        trace!("Entering userland...");
+        debug!("Entering userland...");
         asm!(
             "push {uds:r}",
             "push {stack:r}",

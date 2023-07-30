@@ -1,4 +1,4 @@
-use log::{info, trace};
+use log::{debug, info, trace};
 use x86_64::{
     set_general_handler,
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
@@ -51,10 +51,15 @@ pub fn load_idt() {
 }
 
 extern "x86-interrupt" fn syscall_handler(stack_frame: InterruptStackFrame) {
+    debug!("Syscall");
+
     unsafe {
         SCHEDULER
             .try_lock()
-            .map(|mut s| (&mut **s).update_current_process_stack(&stack_frame))
+            .map(|s| {
+                (&mut **s).update_current_process_stack(&stack_frame);
+                SCHEDULER.unlock();
+            })
             .unwrap_or_else(|| trace!("failed to lock scheduler"));
     };
 
@@ -67,29 +72,14 @@ extern "x86-interrupt" fn syscall_handler(stack_frame: InterruptStackFrame) {
     unsafe {
         SCHEDULER
             .try_lock()
-            .map(|mut s| {
-                (&mut **s).run();
-                panic!("scheduler returned after syscall");
-            })
-            .unwrap_or_else(|| trace!("failed to lock scheduler"));
+            .map(|s| (&mut **s).run_unlock(&mut SCHEDULER))
+            .unwrap_or_else(|| debug!("syscall failed to lock scheduler"));
     };
+
+    debug!("Syscall done");
 }
 
-fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u64>) {
-    unsafe {
-        crate::KERNEL_PAGING
-            .as_mut()
-            .map(|paging| paging.load())
-            .expect("Kernel paging not initialized!");
-    };
-
-    unsafe {
-        SCHEDULER
-            .try_lock()
-            .map(|mut s| (&mut **s).update_current_process_stack(&stack_frame))
-            .unwrap_or_else(|| trace!("failed to lock scheduler"));
-    };
-
+fn irq_handler(_stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u64>) {
     let irq = irq - 32;
 
     match irq {
@@ -97,8 +87,19 @@ fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u6
             driver::i8253::TIMER0.tick();
             SCHEDULER
                 .try_lock()
-                .map(|mut s| (&mut **s).timer_tick())
+                .map(|s| {
+                    (&mut **s).timer_tick();
+                    SCHEDULER.unlock();
+                })
                 .unwrap_or_else(|| trace!("failed to lock scheduler"));
+
+            SCHEDULER
+                .try_lock()
+                .map(|s| {
+                    crate::pic::eoi(irq);
+                    (&mut **s).run_unlock(&mut SCHEDULER)
+                })
+                .unwrap_or_else(|| debug!("timer failed to lock scheduler"));
         },
         1 => unsafe {
             let scancode = inb(0x60);
@@ -108,13 +109,6 @@ fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u6
     }
 
     crate::pic::eoi(irq);
-
-    unsafe {
-        SCHEDULER
-            .try_lock()
-            .map(|mut s| (&mut **s).run())
-            .unwrap_or_else(|| trace!("failed to lock scheduler"));
-    };
 }
 
 extern "x86-interrupt" fn alignment_check_handler(stack_frame: InterruptStackFrame, err: u64) {

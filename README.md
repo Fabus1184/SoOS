@@ -44,6 +44,7 @@ x86_64 operating system written in Rust.
 
 ### Meta
 - [ ] Revise structure / modules
+- [ ] Policy for loglevels
 - [ ] CI
 - [ ] More careful / isolated use of `unsafe`
 - [ ] GCC real cross-compilation

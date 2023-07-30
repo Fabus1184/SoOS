@@ -15,12 +15,13 @@ mod logger;
 mod pic;
 mod process;
 mod scheduler;
+mod spinlock;
 mod stuff;
 mod syscall;
 mod term;
 
 use log::info;
-use spin::mutex::SpinMutex;
+use spinlock::Spinlock;
 use x86_64::{
     instructions::tables,
     registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
@@ -118,7 +119,7 @@ unsafe extern "C" fn _start() -> ! {
     .expect("Failed to init kernel heap!");
 
     log::set_logger(&logger::KernelLogger {}).expect("Failed to set logger!");
-    log::set_max_level(log::LevelFilter::Debug);
+    log::set_max_level(log::LevelFilter::Info);
     info!("Logger initialized!");
 
     idt::load_idt();
@@ -134,6 +135,20 @@ unsafe extern "C" fn _start() -> ! {
 
     let mut scheduler = SoosScheduler::new();
     *SCHEDULER.lock() = &mut scheduler as *mut SoosScheduler;
+    SCHEDULER.unlock();
+
+    let loop_process = Process::from_elf_bytes(
+        include_bytes!("../userspace/loop.elf"),
+        hhdm.offset,
+        kernel_page_table,
+        frame_allocator,
+        ucs,
+        uds,
+        VirtAddr::new(0x0000_4444_ABBA_0000),
+        VirtAddr::new(0x0000_4444_ACDC_0000),
+        1,
+    );
+    info!("Loop Process {:?} loaded!", loop_process.pid);
 
     let process = Process::from_elf_bytes(
         include_bytes!("../userspace/main.elf"),
@@ -153,14 +168,16 @@ unsafe extern "C" fn _start() -> ! {
         .expect("Kernel paging not initialized!");
     info!("Kernel paging loaded!");
 
+    (&mut **SCHEDULER.lock()).schedule(loop_process);
+    SCHEDULER.unlock();
     (&mut **SCHEDULER.lock()).schedule(process);
+    SCHEDULER.unlock();
 
-    info!("Scheduler: {:?}", scheduler);
+    info!("Scheduler: {:#?}", scheduler);
 
-    core::arch::asm!("sti");
-    (&mut **SCHEDULER.lock()).run();
+    (&mut **SCHEDULER.lock()).run_unlock(&mut SCHEDULER);
 
     panic!("Scheduler returned!");
 }
 
-static mut SCHEDULER: SpinMutex<*mut SoosScheduler> = SpinMutex::new(core::ptr::null_mut());
+static mut SCHEDULER: Spinlock<*mut SoosScheduler> = Spinlock::new(core::ptr::null_mut());

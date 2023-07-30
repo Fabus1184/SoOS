@@ -9,7 +9,7 @@ rm -f SoOS.iso || true
 make -C limine
 mkdir -p iso_root
 
-cp -v target/x86_64-unknown-none/debug/soos iso_root/kernel.elf
+cp -v target/x86_64-unknown-none/release/soos iso_root/kernel.elf
 cp -v limine.cfg limine/limine-bios.sys limine/limine-bios-cd.bin limine/limine-uefi-cd.bin iso_root/
 
 mkdir -p iso_root/EFI/BOOT
