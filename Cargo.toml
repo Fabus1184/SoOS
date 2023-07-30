@@ -13,6 +13,7 @@ linked_list_allocator = "0.10.5"
 log = "0.4.19"
 once_cell = { version = "1.18.0", default-features = false }
 raw-cpuid = "11.0.1"
+spin = "0.9.8"
 x86_64 = { version = "0.14.10", default-features = false, features = [
     "abi_x86_interrupt",
     "instructions",

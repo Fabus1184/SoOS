@@ -14,11 +14,13 @@ mod kernel;
 mod logger;
 mod pic;
 mod process;
+mod scheduler;
 mod stuff;
 mod syscall;
 mod term;
 
 use log::info;
+use spin::mutex::SpinMutex;
 use x86_64::{
     instructions::tables,
     registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
@@ -32,6 +34,7 @@ use x86_64::{
 use crate::{
     kernel::paging::{self, SoosFrameAllocator, SoosPaging},
     process::Process,
+    scheduler::SoosScheduler,
     stuff::memmap::SoosMemmap,
     term::TERM,
 };
@@ -47,6 +50,8 @@ static HHDM_REQUEST: limine::HhdmRequest = limine::HhdmRequest::new(0);
 
 const KERNEL_STACK_SIZE: usize = 4192 * 100;
 static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
+
+static mut KERNEL_PAGING: Option<SoosPaging> = None;
 
 #[no_mangle]
 unsafe extern "C" fn _start() -> ! {
@@ -100,15 +105,21 @@ unsafe extern "C" fn _start() -> ! {
     let mut frame_allocator = SoosFrameAllocator::get_or_init_with_current_pagetable(memmap);
 
     let kernel_page_table = paging::current_page_table();
-    let mut kernel_paging = SoosPaging::offset_page_table(hhdm.offset, &mut *kernel_page_table);
+    KERNEL_PAGING = Some(SoosPaging::offset_page_table(
+        hhdm.offset,
+        &mut *kernel_page_table,
+    ));
 
     // no allocation before this point!
-    kernel::allocator::init_kernel_heap(&mut kernel_paging, &mut frame_allocator)
-        .expect("Failed to init kernel heap!");
+    kernel::allocator::init_kernel_heap(
+        KERNEL_PAGING.as_mut().expect("Failed to init kernel heap!"),
+        &mut frame_allocator,
+    )
+    .expect("Failed to init kernel heap!");
 
     log::set_logger(&logger::KernelLogger {}).expect("Failed to set logger!");
     log::set_max_level(log::LevelFilter::Trace);
-    info!("Logger initialized! {}", 2);
+    info!("Logger initialized!");
 
     idt::load_idt();
     pic::init();
@@ -121,7 +132,10 @@ unsafe extern "C" fn _start() -> ! {
         driver::i8253::BCDMode::Binary,
     );
 
-    let mut process = Process::from_elf_bytes(
+    let mut scheduler = SoosScheduler::new();
+    SCHEDULER = Some(&mut scheduler as *mut SoosScheduler);
+
+    let process = Process::from_elf_bytes(
         include_bytes!("../userspace/main.elf"),
         hhdm.offset,
         kernel_page_table,
@@ -132,10 +146,17 @@ unsafe extern "C" fn _start() -> ! {
         VirtAddr::new(0x0000_5555_ACDC_0000),
         100,
     );
+    info!("Process {:?} loaded!", process.pid);
+    KERNEL_PAGING
+        .as_mut()
+        .map(|paging| paging.load())
+        .expect("Kernel paging not initialized!");
+    info!("Kernel paging loaded!");
 
-    info!("process loaded!");
+    scheduler.schedule(process);
+    scheduler.run();
 
-    process.run();
+    panic!("Scheduler returned!");
 }
 
-static mut CURRENT_PROCESS: Option<&
+static mut SCHEDULER: SpinMutex<*mut SoosScheduler> = SpinMutex::new(core::ptr::null_mut());

@@ -4,7 +4,7 @@ use x86_64::{
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
 };
 
-use crate::{asm::inb, driver, syscall::Syscall};
+use crate::{asm::inb, driver, syscall::Syscall, SCHEDULER};
 
 pub static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
@@ -52,17 +52,39 @@ pub fn load_idt() {
 
 extern "x86-interrupt" fn syscall_handler(stack_frame: InterruptStackFrame) {
     unsafe {
+        (&mut *SCHEDULER.expect("Scheduler not initialized!"))
+            .update_current_process_stack(&stack_frame)
+    };
+
+    unsafe {
         Syscall::from_stack_ptr(stack_frame.stack_pointer.as_ptr())
             .expect("failed to read syscall from registers")
             .execute();
     };
+
+    unsafe { (&mut *SCHEDULER.expect("Scheduler not initialized!")).run() }
 }
 
-fn irq_handler(_stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u64>) {
+fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u64>) {
+    unsafe {
+        crate::KERNEL_PAGING
+            .as_mut()
+            .map(|paging| paging.load())
+            .expect("Kernel paging not initialized!");
+    };
+
+    unsafe {
+        (&mut *SCHEDULER.expect("Scheduler not initialized!"))
+            .update_current_process_stack(&stack_frame)
+    };
+
     let irq = irq - 32;
 
     match irq {
-        0 => unsafe { driver::i8253::TIMER0.tick() },
+        0 => unsafe {
+            driver::i8253::TIMER0.tick();
+            (&mut *SCHEDULER.expect("Scheduler not initialized!")).timer_tick()
+        },
         1 => unsafe {
             let scancode = inb(0x60);
             info!("scancode: {}", scancode);
@@ -71,6 +93,8 @@ fn irq_handler(_stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u
     }
 
     crate::pic::eoi(irq);
+
+    unsafe { (&mut *SCHEDULER.expect("Scheduler not initialized!")).run() }
 }
 
 extern "x86-interrupt" fn alignment_check_handler(stack_frame: InterruptStackFrame, err: u64) {

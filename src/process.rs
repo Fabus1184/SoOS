@@ -1,5 +1,6 @@
 use core::arch::asm;
 
+use alloc::collections::BTreeSet;
 use log::trace;
 use x86_64::{
     structures::{
@@ -12,18 +13,40 @@ use x86_64::{
 
 use crate::{elf, kernel::paging::SoosPaging};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum WaitingState {
+    Timer(i64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProcessState {
     Running,
-    Waiting,
+    Waiting(WaitingState),
     Ready,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Pid(u32);
+
 pub struct Process<'a> {
     paging: SoosPaging<'a>,
-    stack: InterruptStackFrameValue,
-    state: ProcessState,
+    pub stack: InterruptStackFrameValue,
+    pub state: ProcessState,
+    pub pid: Pid,
 }
+
+impl core::fmt::Debug for Process<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Process")
+            .field("paging", &(&self.paging as *const _))
+            .field("stack", &self.stack)
+            .field("state", &self.state)
+            .field("pid", &self.pid)
+            .finish()
+    }
+}
+
+static mut PIDS: BTreeSet<Pid> = BTreeSet::new();
 
 impl<'a> Process<'a> {
     pub fn from_elf_bytes(
@@ -81,6 +104,12 @@ impl<'a> Process<'a> {
             };
         }
 
+        let pid = (1..u32::MAX)
+            .find(|i| unsafe { !PIDS.contains(&Pid(*i)) })
+            .unwrap();
+
+        unsafe { PIDS.insert(Pid(pid)) };
+
         Self {
             paging,
             stack: InterruptStackFrameValue {
@@ -91,14 +120,20 @@ impl<'a> Process<'a> {
                 stack_segment: ((user_data_segment.index() * 8) | 3) as u64,
             },
             state: ProcessState::Ready,
+            pid: Pid(pid),
         }
     }
 
     pub unsafe fn run(&mut self) -> ! {
-        self.paging.load();
+        trace!("Disabling interrupts...");
+        asm!("cli");
 
+        trace!("Loading paging...");
+        self.paging.load();
+        trace!("Paging loaded!");
+
+        trace!("Entering userland...");
         asm!(
-            "cli",
             "push {uds:r}",
             "push {stack:r}",
             "push {rflags:r}",

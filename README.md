@@ -9,16 +9,18 @@ x86_64 operating system written in Rust.
 - [x] basic framebuffer text output
 - [x] i8253 PIT
 - [x] RTC (CMOS)
-- [x] paging (4-level)
-- [x] kernel heap allocation
+- [x] Paging (4-level)
+- [x] Kernel heap allocation
 - [x] ELF64 binary loader
-- [x] basic syscall functionality
-- [x] fancy logging with [`log`](https://crates.io/crates/log)
+- [x] Basic syscall functionality
+- [x] Fancy logging with [`log`](https://crates.io/crates/log)
 
 ## Work in progress
 - [ ] Preemptive multitasking & Process management
 
 ## Roadmap
+- [ ] Fix bugs & undefined behaviors that I'm sure are lurking somewhere
+- [ ] Stop disabling interrupts at all
 
 ### Kernel
 - [ ] Virtual File System
@@ -26,9 +28,9 @@ x86_64 operating system written in Rust.
 
 ### Userland
 - [ ] `init` process
-- [ ] shell
-- [ ] implement libc
-- [ ] dynamic linking
+- [ ] Shell
+- [ ] Implement libc
+- [ ] Dynamic linking
 
 ### Hardware
 - [ ] IOAPIC
@@ -39,3 +41,9 @@ x86_64 operating system written in Rust.
 - [ ] ACPI
 - [ ] PCI
 - [ ] USB
+
+### Meta
+- [ ] Revise structure / modules
+- [ ] CI
+- [ ] More careful / isolated use of `unsafe`
+- [ ] GCC real cross-compilation

@@ -15,8 +15,7 @@ void _start() {
         print(MESSAGE);
 
         MESSAGE[0] += 1;
-        for (uint64_t i = 0; i < 100 * 1000 * 1000; ++i) {
-            asm("nop");
-        }
+
+        sleep(100);
     }
 }

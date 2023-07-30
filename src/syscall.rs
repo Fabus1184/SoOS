@@ -1,19 +1,22 @@
 use alloc::{format, string::String};
 use log::info;
 
+use crate::SCHEDULER;
+
 #[derive(Debug, Clone, Copy)]
 pub enum Syscall {
     Print(*const i8),
-    Sleep(u64),
+    Sleep(i64),
 }
 
 impl Syscall {
     pub unsafe fn from_stack_ptr(ptr: *const u64) -> Result<Self, String> {
         let n: u64 = *ptr;
-        let arg1 = *(ptr.offset(1));
+        let arg1: u64 = *(ptr.offset(1));
 
         match n {
             0 => Ok(Self::Print(arg1 as *const i8)),
+            1 => Ok(Self::Sleep(arg1 as i64)),
             _ => Err(format!("unknown syscall: n {:?}, arg1: {:?}", n, arg1)),
         }
     }
@@ -26,6 +29,9 @@ impl Syscall {
             }
             Self::Sleep(ms) => {
                 info!("syscall sleep: {:?}", ms);
+                unsafe SCHEDULER.try_lock().map(|mut scheduler| unsafe {
+                    scheduler.sleep(ms);
+                });
             }
         }
     }
