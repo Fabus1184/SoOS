@@ -1,4 +1,4 @@
-use crate::asm::{inb, outb};
+use x86_64::structures::port::{PortRead, PortWrite};
 
 #[repr(u8)]
 #[derive(Copy, Clone)]
@@ -100,9 +100,9 @@ impl Timer {
         };
 
         unsafe {
-            outb(COMMAND_PORT, mode);
-            outb(data_port, (divisor & 0xFF) as u8);
-            outb(data_port, ((divisor >> 8) & 0xFF) as u8);
+            PortWrite::write_to_port(COMMAND_PORT, mode);
+            PortWrite::write_to_port(data_port, (divisor & 0xFF) as u8);
+            PortWrite::write_to_port(data_port, ((divisor >> 8) & 0xFF) as u8);
         }
 
         self.channel = channel;
@@ -132,11 +132,23 @@ impl Timer {
         };
 
         match self.access_mode {
-            AccessMode::LoByte => unsafe { inb(data_port) as u16 },
-            AccessMode::HiByte => unsafe { (inb(data_port) as u16) << 8 },
+            AccessMode::LoByte => unsafe {
+                let b: u8 = PortRead::read_from_port(data_port);
+                b as u16
+            },
+            AccessMode::HiByte => unsafe {
+                let b: u8 = PortRead::read_from_port(data_port);
+                (b as u16) << 8
+            },
             AccessMode::LoHiByte => {
-                let lo = unsafe { inb(data_port) as u16 };
-                let hi = unsafe { inb(data_port) as u16 } << 8;
+                let lo = unsafe {
+                    let b: u8 = PortRead::read_from_port(data_port);
+                    b as u16
+                };
+                let hi = unsafe {
+                    let b: u8 = PortRead::read_from_port(data_port);
+                    b as u16
+                } << 8;
                 lo | hi
             }
             _ => 0,
@@ -147,5 +159,9 @@ impl Timer {
         core::time::Duration::from_millis(
             (self.ticks as f64 / self.frequency as f64 * 1000.0) as u64,
         )
+    }
+
+    pub fn ticks(&self) -> u64 {
+        self.ticks
     }
 }

@@ -1,107 +1,151 @@
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use alloc::vec::Vec;
-use log::{debug, info, trace};
+use log::{debug, info, trace, warn};
 use x86_64::structures::idt::InterruptStackFrame;
 
 use crate::{
-    process::{Pid, Process, ProcessState, WaitingState},
-    spinlock::Spinlock,
+    driver::i8253::TIMER0,
+    process::{Process, ProcessState, WaitingState},
 };
 
 #[derive(Debug)]
 pub struct SoosScheduler<'a> {
     processes: Vec<Process<'a>>,
-    current_process_pid: Option<Pid>,
+    lock: AtomicBool,
+    current_process: Option<*mut Process<'a>>,
 }
 
 impl<'a> SoosScheduler<'a> {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             processes: Vec::new(),
-            current_process_pid: None,
+            lock: AtomicBool::new(false),
+            current_process: None,
         }
+    }
+
+    pub fn running(&self) -> bool {
+        self.lock.load(Ordering::SeqCst)
     }
 
     pub unsafe fn schedule(&mut self, process: Process<'a>) {
+        self.lock
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .expect("Scheduler already running!");
+
         info!("Scheduling process {:?}...", process.pid);
         self.processes.push(process);
+
+        self.lock
+            .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+            .expect("Scheduler not running!");
     }
 
-    pub unsafe fn run_unlock(&mut self, spinlock: &mut Spinlock<*mut Self>) {
-        debug!("Running scheduler...");
+    pub unsafe fn run(&mut self) -> Option<!> {
+        self.lock
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()?;
+        {
+            debug!("Running scheduler...");
 
-        if self.processes.is_empty() {
-            debug!("No processes to run!");
-            return;
+            if self.processes.is_empty() {
+                panic!("No processes to run!");
+            }
+
+            self.current_process
+                .as_mut()
+                .map(|p| {
+                    if (&mut **p).state == ProcessState::Running {
+                        (&mut **p).state = ProcessState::Ready;
+                    }
+                })
+                .unwrap_or_else(|| warn!("No current process!"));
         }
+        self.lock
+            .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+            .expect("Scheduler not running!");
 
-        if self.current_process_pid.is_some() {
-            let current_process = self
-                .processes
-                .iter_mut()
-                .find(|p| p.pid == self.current_process_pid.unwrap())
-                .unwrap();
+        loop {
+            if self
+                .lock
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                self.processes.rotate_left(1);
 
-            if current_process.state == ProcessState::Running {
-                current_process.state = ProcessState::Ready;
+                if match self.processes.first().unwrap().state {
+                    ProcessState::Running => unreachable!(),
+                    ProcessState::Waiting(WaitingState::Timer(ts)) => {
+                        if TIMER0.ticks() > ts {
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    ProcessState::Ready => true,
+                    _ => false,
+                } {
+                    break;
+                } else {
+                    debug!(
+                        "Skipping process {:?} because of state {:?}...",
+                        self.processes.first().unwrap().pid,
+                        self.processes.first().unwrap().state
+                    );
+
+                    self.lock
+                        .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+                        .expect("Scheduler not running!");
+                }
             }
         }
 
-        self.processes.rotate_left(1);
+        self.current_process = Some(self.processes.first_mut().unwrap() as *mut _);
 
-        while self.processes.first().unwrap().state != ProcessState::Ready {
-            trace!(
-                "Skipping process {:?} because of state {:?}...",
-                self.processes.first().unwrap().pid,
-                self.processes.first().unwrap().state
-            );
-            self.processes.rotate_left(1);
-        }
-
-        self.current_process_pid = Some(self.processes.first().unwrap().pid);
-
-        debug!("Running process {:?}...", self.current_process_pid.unwrap());
+        debug!("Running process {:?}...", self.current_process.unwrap());
 
         unsafe {
-            self.processes
-                .first_mut()
-                .unwrap()
-                .run(|| spinlock.unlock())
+            self.processes.first_mut().unwrap().run(|| {
+                self.lock
+                    .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+                    .expect("Scheduler not running!");
+            });
         };
     }
 
-    pub unsafe fn sleep(&mut self, ms: i64) {
-        trace!("Sleeping current process for {}ms...", ms);
-        self.processes
-            .iter_mut()
-            .find(|p| p.pid == self.current_process_pid.expect("No current process!"))
-            .expect("Current process not found!")
-            .state = ProcessState::Waiting(WaitingState::Timer(ms));
-    }
+    pub unsafe fn sleep(&mut self, ms: u64) {
+        self.lock
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .expect("Scheduler already running!");
 
-    pub fn timer_tick(&mut self) {
-        trace!("Timer tick!");
-        self.processes.iter_mut().for_each(|p| match p.state {
-            ProcessState::Waiting(WaitingState::Timer(0)) => {
-                p.state = ProcessState::Ready;
-            }
-            ProcessState::Waiting(WaitingState::Timer(ms)) => {
-                p.state = if ms < 0 {
-                    ProcessState::Ready
-                } else {
-                    ProcessState::Waiting(WaitingState::Timer(ms - 1))
-                };
-            }
-            _ => {}
-        });
+        trace!("Sleeping current process for {}ms...", ms);
+        self.current_process
+            .as_mut()
+            .map(|p| {
+                (&mut **p).state = ProcessState::Waiting(WaitingState::Timer(TIMER0.ticks() + ms));
+            })
+            .unwrap_or_else(|| warn!("No current process!"));
+
+        self.lock
+            .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+            .expect("Scheduler not running!");
     }
 
     pub fn update_current_process_stack(&mut self, stack_frame: &InterruptStackFrame) {
-        if self.current_process_pid.is_some() {
-            self.processes
-                .iter_mut()
-                .find(|p| p.pid == self.current_process_pid.expect("No current process!"))
-                .expect("Current process not found!")
-                .stack = **stack_frame;
-        }
+        self.lock
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .expect("Scheduler already running!");
+
+        self.current_process
+            .as_mut()
+            .map(|p| {
+                (unsafe { &mut **p }).stack = **stack_frame;
+            })
+            .unwrap_or_else(|| warn!("No current process!"));
+
+        self.lock
+            .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+            .expect("Scheduler not running!");
     }
 }

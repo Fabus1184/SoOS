@@ -1,4 +1,4 @@
-use crate::asm::{inb, outb};
+use x86_64::structures::port::{PortRead, PortWrite};
 
 pub fn get_time() -> chrono::NaiveDateTime {
     let mut second = rtc_read(0x00);
@@ -58,12 +58,12 @@ fn rtc_read(reg: u8) -> u8 {
     core::iter::repeat_with(|| {
         (
             unsafe {
-                outb(CMOS_ADDRESS, reg);
-                inb(CMOS_DATA)
+                PortWrite::write_to_port(CMOS_ADDRESS, reg);
+                PortRead::read_from_port(CMOS_DATA)
             },
             unsafe {
-                outb(CMOS_ADDRESS, reg);
-                inb(CMOS_DATA)
+                PortWrite::write_to_port(CMOS_ADDRESS, reg);
+                PortRead::read_from_port(CMOS_DATA)
             },
         )
     })

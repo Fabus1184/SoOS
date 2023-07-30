@@ -15,7 +15,7 @@ use crate::{elf, kernel::paging::SoosPaging};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum WaitingState {
-    Timer(i64),
+    Timer(u64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

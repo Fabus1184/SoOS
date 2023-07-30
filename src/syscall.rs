@@ -1,12 +1,12 @@
 use alloc::{format, string::String};
-use log::{info, trace};
+use log::info;
 
 use crate::SCHEDULER;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Syscall {
     Print(*const i8),
-    Sleep(i64),
+    Sleep(u64),
 }
 
 impl Syscall {
@@ -16,7 +16,7 @@ impl Syscall {
 
         match n {
             0 => Ok(Self::Print(arg1 as *const i8)),
-            1 => Ok(Self::Sleep(arg1 as i64)),
+            1 => Ok(Self::Sleep(arg1)),
             _ => Err(format!("unknown syscall: n {:?}, arg1: {:?}", n, arg1)),
         }
     }
@@ -30,13 +30,7 @@ impl Syscall {
             Self::Sleep(ms) => {
                 info!("syscall sleep: {:?}", ms);
                 unsafe {
-                    SCHEDULER
-                        .try_lock()
-                        .map(|s| {
-                            (&mut **s).sleep(ms);
-                            SCHEDULER.unlock();
-                        })
-                        .unwrap_or_else(|| trace!("failed to lock scheduler"));
+                    SCHEDULER.sleep(ms);
                 };
             }
         }

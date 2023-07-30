@@ -2,10 +2,10 @@
 #![no_main]
 #![feature(abi_x86_interrupt)]
 #![feature(stmt_expr_attributes)]
+#![feature(never_type)]
 
 extern crate alloc;
 
-mod asm;
 mod driver;
 mod elf;
 mod font;
@@ -21,12 +21,12 @@ mod syscall;
 mod term;
 
 use log::info;
-use spinlock::Spinlock;
+
 use x86_64::{
     instructions::tables,
     registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
     structures::{
-        gdt::{Descriptor, GlobalDescriptorTable},
+        gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
         tss::TaskStateSegment,
     },
     VirtAddr,
@@ -54,6 +54,9 @@ static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
 
 static mut KERNEL_PAGING: Option<SoosPaging> = None;
 
+static mut KERNEL_STACK_SEGMENT: Option<SegmentSelector> = None;
+static mut KERNEL_CODE_SEGMENT: Option<SegmentSelector> = None;
+
 #[no_mangle]
 unsafe extern "C" fn _start() -> ! {
     static mut TSS: TaskStateSegment = TaskStateSegment::new();
@@ -69,6 +72,9 @@ unsafe extern "C" fn _start() -> ! {
     let ucs = GDT.add_entry(Descriptor::user_code_segment());
     let uds = GDT.add_entry(Descriptor::user_data_segment());
     let tss = GDT.add_entry(Descriptor::tss_segment(&TSS));
+
+    KERNEL_STACK_SEGMENT = Some(ds);
+    KERNEL_CODE_SEGMENT = Some(cs);
 
     GDT.load();
 
@@ -133,23 +139,6 @@ unsafe extern "C" fn _start() -> ! {
         driver::i8253::BCDMode::Binary,
     );
 
-    let mut scheduler = SoosScheduler::new();
-    *SCHEDULER.lock() = &mut scheduler as *mut SoosScheduler;
-    SCHEDULER.unlock();
-
-    let loop_process = Process::from_elf_bytes(
-        include_bytes!("../userspace/loop.elf"),
-        hhdm.offset,
-        kernel_page_table,
-        frame_allocator,
-        ucs,
-        uds,
-        VirtAddr::new(0x0000_4444_ABBA_0000),
-        VirtAddr::new(0x0000_4444_ACDC_0000),
-        1,
-    );
-    info!("Loop Process {:?} loaded!", loop_process.pid);
-
     let process = Process::from_elf_bytes(
         include_bytes!("../userspace/main.elf"),
         hhdm.offset,
@@ -168,16 +157,9 @@ unsafe extern "C" fn _start() -> ! {
         .expect("Kernel paging not initialized!");
     info!("Kernel paging loaded!");
 
-    (&mut **SCHEDULER.lock()).schedule(loop_process);
-    SCHEDULER.unlock();
-    (&mut **SCHEDULER.lock()).schedule(process);
-    SCHEDULER.unlock();
+    SCHEDULER.schedule(process);
 
-    info!("Scheduler: {:#?}", scheduler);
-
-    (&mut **SCHEDULER.lock()).run_unlock(&mut SCHEDULER);
-
-    panic!("Scheduler returned!");
+    SCHEDULER.run().expect("Scheduler failed to run!");
 }
 
-static mut SCHEDULER: Spinlock<*mut SoosScheduler> = Spinlock::new(core::ptr::null_mut());
+static mut SCHEDULER: SoosScheduler = SoosScheduler::new();

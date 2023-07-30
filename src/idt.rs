@@ -1,10 +1,18 @@
-use log::{debug, info, trace};
+use core::arch::asm;
+
+use log::{debug, info, warn};
 use x86_64::{
     set_general_handler,
-    structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
+    structures::{
+        idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
+        port::PortRead,
+    },
 };
 
-use crate::{asm::inb, driver, syscall::Syscall, SCHEDULER};
+use crate::{
+    driver, syscall::Syscall, KERNEL_CODE_SEGMENT, KERNEL_PAGING, KERNEL_STACK,
+    KERNEL_STACK_SEGMENT, SCHEDULER,
+};
 
 pub static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
@@ -50,17 +58,51 @@ pub fn load_idt() {
     }
 }
 
+extern "C" fn _run_scheduler() {
+    unsafe { SCHEDULER.run().expect("failed to run scheduler") };
+}
+
+fn run_scheduler() -> Option<!> {
+    unsafe {
+        KERNEL_PAGING
+            .as_mut()
+            .expect("kernel paging not set")
+            .load()
+    };
+
+    if unsafe { !SCHEDULER.running() } {
+        unsafe {
+            asm!(
+                "push {kds:r}",
+                "push {stack:r}",
+                "push {rflags:r}",
+                "push {kcs:r}",
+                "push {func:r}",
+                "mov ax, {kds:x}",
+                "mov ds, ax",
+                "mov es, ax",
+                "mov fs, ax",
+                "mov gs, ax",
+                "iretq",
+                kds = in(reg) (KERNEL_STACK_SEGMENT.expect("kernel stack segment not set").index() * 8) | 0,
+                kcs = in(reg) (KERNEL_CODE_SEGMENT.expect("kernel code segment not set").index() * 8) | 0,
+                // out("ax") _,
+                stack = in(reg) KERNEL_STACK.as_mut_ptr() as u64 + KERNEL_STACK.len() as u64,
+                rflags = in(reg) 0x202,
+                func = in(reg) _run_scheduler as u64,
+                options(noreturn),
+            )
+        };
+    } else {
+        None
+    }
+}
+
 extern "x86-interrupt" fn syscall_handler(stack_frame: InterruptStackFrame) {
     debug!("Syscall");
 
     unsafe {
-        SCHEDULER
-            .try_lock()
-            .map(|s| {
-                (&mut **s).update_current_process_stack(&stack_frame);
-                SCHEDULER.unlock();
-            })
-            .unwrap_or_else(|| trace!("failed to lock scheduler"));
+        SCHEDULER.update_current_process_stack(&stack_frame);
     };
 
     unsafe {
@@ -69,14 +111,7 @@ extern "x86-interrupt" fn syscall_handler(stack_frame: InterruptStackFrame) {
             .execute();
     };
 
-    unsafe {
-        SCHEDULER
-            .try_lock()
-            .map(|s| (&mut **s).run_unlock(&mut SCHEDULER))
-            .unwrap_or_else(|| debug!("syscall failed to lock scheduler"));
-    };
-
-    debug!("Syscall done");
+    run_scheduler();
 }
 
 fn irq_handler(_stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u64>) {
@@ -85,30 +120,19 @@ fn irq_handler(_stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u
     match irq {
         0 => unsafe {
             driver::i8253::TIMER0.tick();
-            SCHEDULER
-                .try_lock()
-                .map(|s| {
-                    (&mut **s).timer_tick();
-                    SCHEDULER.unlock();
-                })
-                .unwrap_or_else(|| trace!("failed to lock scheduler"));
-
-            SCHEDULER
-                .try_lock()
-                .map(|s| {
-                    crate::pic::eoi(irq);
-                    (&mut **s).run_unlock(&mut SCHEDULER)
-                })
-                .unwrap_or_else(|| debug!("timer failed to lock scheduler"));
+            crate::pic::eoi(irq);
+            run_scheduler();
         },
         1 => unsafe {
-            let scancode = inb(0x60);
+            let scancode: u8 = PortRead::read_from_port(0x60);
             info!("scancode: {}", scancode);
+            crate::pic::eoi(irq);
         },
-        _ => info!("irq: {}", irq),
+        _ => {
+            info!("irq: {}", irq);
+            crate::pic::eoi(irq);
+        }
     }
-
-    crate::pic::eoi(irq);
 }
 
 extern "x86-interrupt" fn alignment_check_handler(stack_frame: InterruptStackFrame, err: u64) {
