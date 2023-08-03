@@ -28,6 +28,12 @@ pub enum ProcessState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Pid(u32);
 
+impl Pid {
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+}
+
 pub struct Process<'a> {
     paging: SoosPaging<'a>,
     pub stack: InterruptStackFrameValue,
@@ -124,20 +130,18 @@ impl<'a> Process<'a> {
         }
     }
 
-    pub unsafe fn run<F>(&mut self, mut atomic_op: F) -> !
-    where
-        F: FnMut(),
-    {
-        trace!("Disabling interrupts...");
-        asm!("cli");
-
-        atomic_op();
-
-        trace!("Loading paging...");
+    pub unsafe fn run(&mut self) -> ! {
+        trace!("loading process paging...");
         self.paging.load();
-        trace!("Paging loaded!");
 
-        debug!("Entering userland...");
+        debug!(
+            "entering userland... ss: {:?}, sp: {:x?}, cs: {:?}, ip: {:x?}, flags: {:x?}",
+            self.stack.stack_segment,
+            self.stack.stack_pointer,
+            self.stack.code_segment,
+            self.stack.instruction_pointer,
+            self.stack.cpu_flags,
+        );
         asm!(
             "push {uds:r}",
             "push {stack:r}",

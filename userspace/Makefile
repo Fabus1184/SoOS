@@ -1,6 +1,5 @@
 build:
-	gcc -fPIC -fPIE -ffreestanding -nostdlib -o main.elf main.c soos_syscall.c
-	gcc -fPIC -fPIE -ffreestanding -nostdlib -o loop.elf loop.c
+	gcc -fstack-protector -O0 -fPIC -fPIE -ffreestanding -nostdlib -o main.elf main.c soos.c soos_syscall.c
 
 clean:
 	rm main.elf || true

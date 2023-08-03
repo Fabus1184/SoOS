@@ -7,32 +7,40 @@ use crate::SCHEDULER;
 pub enum Syscall {
     Print(*const i8),
     Sleep(u64),
+    Getpid(*mut u64),
 }
 
 impl Syscall {
-    pub unsafe fn from_stack_ptr(ptr: *const u64) -> Result<Self, String> {
-        let n: u64 = *ptr;
-        let arg1: u64 = *(ptr.offset(1));
-
-        match n {
-            0 => Ok(Self::Print(arg1 as *const i8)),
-            1 => Ok(Self::Sleep(arg1)),
-            _ => Err(format!("unknown syscall: n {:?}, arg1: {:?}", n, arg1)),
+    pub unsafe fn from_regs(rax: u64, rbx: u64) -> Result<(), String> {
+        match rax {
+            0 => Ok(Self::Print(rbx as *const i8)),
+            1 => Ok(Self::Sleep(rbx)),
+            2 => Ok(Self::Getpid(rbx as *mut u64)),
+            _ => Err(format!("unknown syscall: rax {:?}, rbx {:?}", rax, rbx)),
         }
+        .map(|s| {
+            info!("syscall {:?}", s);
+            s.execute();
+        })
     }
 
     pub fn execute(self) {
         match self {
             Self::Print(ptr) => {
                 let cstr = unsafe { core::ffi::CStr::from_ptr(ptr) };
-                info!("syscall print: ({:?}) {:?}", ptr, cstr);
+                let str = cstr.to_str().expect("failed to convert cstr to str");
+                info!("{}", str);
             }
             Self::Sleep(ms) => {
-                info!("syscall sleep: {:?}", ms);
                 unsafe {
                     SCHEDULER.sleep(ms);
                 };
             }
+            Self::Getpid(ptr) => unsafe {
+                *ptr = (*SCHEDULER.current_process.expect("no current process"))
+                    .pid
+                    .as_u32() as u64;
+            },
         }
     }
 }

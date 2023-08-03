@@ -2,12 +2,12 @@
 #![no_main]
 #![feature(abi_x86_interrupt)]
 #![feature(stmt_expr_attributes)]
-#![feature(never_type)]
 
 extern crate alloc;
 
 mod driver;
 mod elf;
+mod fifo;
 mod font;
 mod idt;
 mod kernel;
@@ -20,8 +20,10 @@ mod stuff;
 mod syscall;
 mod term;
 
+use fifo::BoundedAtomicFifo;
 use log::info;
 
+use spinlock::Spinlock;
 use x86_64::{
     instructions::tables,
     registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
@@ -65,6 +67,10 @@ unsafe extern "C" fn _start() -> ! {
         VirtAddr::zero(),
         VirtAddr::zero(),
     ];
+    for i in 0..7 {
+        TSS.interrupt_stack_table[i] =
+            VirtAddr::new(KERNEL_STACK.as_mut_ptr() as u64 + KERNEL_STACK.len() as u64);
+    }
 
     static mut GDT: GlobalDescriptorTable = GlobalDescriptorTable::new();
     let cs = GDT.add_entry(Descriptor::kernel_code_segment());
@@ -125,41 +131,60 @@ unsafe extern "C" fn _start() -> ! {
     .expect("Failed to init kernel heap!");
 
     log::set_logger(&logger::KernelLogger {}).expect("Failed to set logger!");
-    log::set_max_level(log::LevelFilter::Info);
+    log::set_max_level(log::LevelFilter::Trace);
     info!("Logger initialized!");
 
     idt::load_idt();
     pic::init();
 
     driver::i8253::TIMER0.init(
-        100,
+        10,
         driver::i8253::Channel::CH0,
         driver::i8253::AccessMode::LoHiByte,
         driver::i8253::OperatingMode::RateGenerator,
         driver::i8253::BCDMode::Binary,
     );
 
-    let process = Process::from_elf_bytes(
-        include_bytes!("../userspace/main.elf"),
-        hhdm.offset,
-        kernel_page_table,
-        frame_allocator,
-        ucs,
-        uds,
-        VirtAddr::new(0x0000_5555_ABBA_0000),
-        VirtAddr::new(0x0000_5555_ACDC_0000),
-        100,
-    );
-    info!("Process {:?} loaded!", process.pid);
-    KERNEL_PAGING
-        .as_mut()
-        .map(|paging| paging.load())
-        .expect("Kernel paging not initialized!");
-    info!("Kernel paging loaded!");
+    {
+        let process = Process::from_elf_bytes(
+            include_bytes!("../userspace/main.elf"),
+            hhdm.offset,
+            kernel_page_table,
+            frame_allocator,
+            ucs,
+            uds,
+            VirtAddr::new(0x0000_5555_ABBA_0000),
+            VirtAddr::new(0x0000_5555_ACDC_0000),
+            100,
+        );
+        info!("Process {:?} loaded!", process.pid);
+        KERNEL_PAGING
+            .as_mut()
+            .map(|paging| paging.load())
+            .expect("Kernel paging not initialized!");
+        SCHEDULER.inner_unsafe().schedule(process);
+    }
+    /*{
+        let process = Process::from_elf_bytes(
+            include_bytes!("../userspace/main.elf"),
+            hhdm.offset,
+            kernel_page_table,
+            frame_allocator,
+            ucs,
+            uds,
+            VirtAddr::new(0x0000_4444_ABBA_0000),
+            VirtAddr::new(0x0000_4444_ACDC_0000),
+            100,
+        );
+        info!("Process {:?} loaded!", process.pid);
+        KERNEL_PAGING
+            .as_mut()
+            .map(|paging| paging.load())
+            .expect("Kernel paging not initialized!");
+        SCHEDULER.schedule(process);
+    }*/
 
-    SCHEDULER.schedule(process);
-
-    SCHEDULER.run().expect("Scheduler failed to run!");
+    SCHEDULER.inner_unsafe().run();
 }
 
 static mut SCHEDULER: SoosScheduler = SoosScheduler::new();

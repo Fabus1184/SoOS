@@ -12,7 +12,7 @@ impl log::Log for KernelLogger {
     fn log(&self, record: &log::Record) {
         unsafe {
             term::TERM.println(&format!(
-                "[{}]({}:{}): {}",
+                "[{}] ({}:{}) {}",
                 record.level(),
                 record.file().unwrap_or("unknown"),
                 record.line().unwrap_or(0),

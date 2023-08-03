@@ -1,12 +1,13 @@
 use core::arch::asm;
 
-use log::{debug, info, warn};
+use log::{info, trace, warn};
 use x86_64::{
     set_general_handler,
     structures::{
         idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
         port::PortRead,
     },
+    VirtAddr,
 };
 
 use crate::{
@@ -35,7 +36,9 @@ pub fn load_idt() {
         IDT.non_maskable_interrupt
             .set_handler_fn(non_maskable_interrupt_handler);
         IDT.overflow.set_handler_fn(overflow_handler);
+
         IDT.page_fault.set_handler_fn(page_fault_handler);
+
         IDT.security_exception
             .set_handler_fn(security_exception_handler);
         IDT.segment_not_present
@@ -51,11 +54,15 @@ pub fn load_idt() {
         set_general_handler!(&mut IDT, irq_handler, 32..=47);
 
         IDT[0x80]
-            .set_handler_fn(syscall_handler)
+            .set_handler_addr(VirtAddr::new(syscall_handler_asm_stub as u64))
             .set_privilege_level(x86_64::PrivilegeLevel::Ring3);
 
         IDT.load();
     }
+}
+
+extern "x86-interrupt" {
+    fn syscall_handler_asm_stub();
 }
 
 extern "C" fn _run_scheduler() {
@@ -63,6 +70,7 @@ extern "C" fn _run_scheduler() {
 }
 
 fn run_scheduler() -> Option<!> {
+    trace!("run_scheduler: loading kernel paging");
     unsafe {
         KERNEL_PAGING
             .as_mut()
@@ -98,30 +106,47 @@ fn run_scheduler() -> Option<!> {
     }
 }
 
-extern "x86-interrupt" fn syscall_handler(stack_frame: InterruptStackFrame) {
-    debug!("Syscall");
+#[no_mangle]
+pub extern "C" fn syscall_handler(rax: u64, rbx: u64, stack_frame: InterruptStackFrame) {
+    trace!(
+        "syscall_handler: rax {:?}, rbx {:?}, stack_frame {:?}",
+        rax,
+        rbx,
+        stack_frame
+    );
 
-    unsafe {
-        SCHEDULER.update_current_process_stack(&stack_frame);
-    };
+    if stack_frame.code_segment == 8 {
+        panic!();
+    }
 
-    unsafe {
-        Syscall::from_stack_ptr(stack_frame.stack_pointer.as_ptr())
-            .expect("failed to read syscall from registers")
-            .execute();
-    };
+    if stack_frame.code_segment == 27 {
+        unsafe { SCHEDULER.update_current_process_stack_frame(&stack_frame) };
+    }
+
+    unsafe { Syscall::from_regs(rax, rbx).expect("failed to read syscall from registers") };
 
     run_scheduler();
 }
 
-fn irq_handler(_stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u64>) {
+fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u64>) {
+    trace!("irq_handler: irq {:?}, stack_frame {:?}", irq, stack_frame);
+
     let irq = irq - 32;
 
     match irq {
         0 => unsafe {
             driver::i8253::TIMER0.tick();
-            crate::pic::eoi(irq);
-            run_scheduler();
+
+            if !SCHEDULER.running() {
+                if stack_frame.code_segment == 27 {
+                    SCHEDULER.update_current_process_stack_frame(&stack_frame);
+                }
+
+                crate::pic::eoi(irq);
+                run_scheduler();
+            } else {
+                crate::pic::eoi(irq);
+            }
         },
         1 => unsafe {
             let scancode: u8 = PortRead::read_from_port(0x60);
@@ -133,6 +158,8 @@ fn irq_handler(_stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u
             crate::pic::eoi(irq);
         }
     }
+
+    trace!("irq_handler: end");
 }
 
 extern "x86-interrupt" fn alignment_check_handler(stack_frame: InterruptStackFrame, err: u64) {

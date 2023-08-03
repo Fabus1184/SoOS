@@ -16,7 +16,7 @@ impl<T> Spinlock<T> {
         }
     }
 
-    pub fn lock(&mut self) -> &mut T {
+    pub fn lock_spin(&mut self) -> &mut T {
         while self
             .lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -38,5 +38,9 @@ impl<T> Spinlock<T> {
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .ok()
             .map(|_| &mut self.inner)
+    }
+
+    pub unsafe fn inner_unsafe(&self) -> &mut T {
+        &mut self.inner
     }
 }

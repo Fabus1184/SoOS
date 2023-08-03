@@ -1,23 +1,32 @@
 #include <stdint.h>
 
 void print(const char *str) {
-    asm("push %[str]\n"
-        "push $0\n"
-        "int $0x80\n"
-        "pop %%rax\n"
-        "pop %%rax\n"
-
-        ::[str] "r"(str)
-        : "rax");
+    asm volatile("mov $0, %%rax\n"
+                 "mov %[str], %%rbx\n"
+                 "int $0x80\n"
+                 :
+                 : [str] "r"(str)
+                 : "rax", "rbx");
 }
 
-void sleep(int64_t ms) {
-    asm("push %[ms]\n"
-        "push $1\n"
-        "int $0x80\n"
-        "pop %%rax\n"
-        "pop %%rax\n"
+void sleep(uint64_t ms) {
+    asm volatile("mov $1, %%rax\n"
+                 "mov %[ms], %%rbx\n"
+                 "int $0x80\n"
+                 :
+                 : [ms] "r"(ms)
+                 : "rax", "rbx");
+}
 
-        ::[ms] "r"(ms)
-        : "rax");
+uint64_t getpid(void) {
+    uint64_t pid;
+    asm volatile("mov $2, %%rax\n"
+                 "mov %[pid], %%rbx\n"
+                 "int $0x80\n"
+
+                 : "=r"(pid)
+                 : [pid] "r"(&pid)
+                 : "rax", "rbx");
+
+    return pid;
 }
