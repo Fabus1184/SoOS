@@ -65,6 +65,7 @@ extern "x86-interrupt" {
     fn syscall_handler_asm_stub();
 }
 
+/*
 extern "C" fn _run_scheduler() {
     unsafe { SCHEDULER.run().expect("failed to run scheduler") };
 }
@@ -104,7 +105,7 @@ fn run_scheduler() -> Option<!> {
     } else {
         None
     }
-}
+}*/
 
 #[no_mangle]
 pub extern "C" fn syscall_handler(rax: u64, rbx: u64, stack_frame: InterruptStackFrame) {
@@ -115,17 +116,20 @@ pub extern "C" fn syscall_handler(rax: u64, rbx: u64, stack_frame: InterruptStac
         stack_frame
     );
 
-    if stack_frame.code_segment == 8 {
-        panic!();
-    }
+    unsafe {
+        SCHEDULER
+            .try_lock()
+            .map(|s| {
+                s.update_current_process_stack_frame(&stack_frame);
 
-    if stack_frame.code_segment == 27 {
-        unsafe { SCHEDULER.update_current_process_stack_frame(&stack_frame) };
-    }
+                Syscall::from_regs(rax, rbx)
+                    .expect("failed to read syscall from registers")
+                    .execute(s);
 
-    unsafe { Syscall::from_regs(rax, rbx).expect("failed to read syscall from registers") };
-
-    run_scheduler();
+                s.run(|| SCHEDULER.unlock());
+            })
+            .expect("syscall_handler: failed to lock scheduler");
+    };
 }
 
 fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u64>) {
@@ -137,16 +141,15 @@ fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u6
         0 => unsafe {
             driver::i8253::TIMER0.tick();
 
-            if !SCHEDULER.running() {
-                if stack_frame.code_segment == 27 {
-                    SCHEDULER.update_current_process_stack_frame(&stack_frame);
-                }
-
-                crate::pic::eoi(irq);
-                run_scheduler();
-            } else {
-                crate::pic::eoi(irq);
-            }
+            SCHEDULER
+                .with_locked(|s| {
+                    s.update_current_process_stack_frame(&stack_frame);
+                    s.run(|| {
+                        crate::pic::eoi(irq);
+                        SCHEDULER.unlock();
+                    });
+                })
+                .unwrap_or_else(|| warn!("irq_handler: failed to lock scheduler"));
         },
         1 => unsafe {
             let scancode: u8 = PortRead::read_from_port(0x60);

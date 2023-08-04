@@ -26,7 +26,10 @@ impl<'a> SoosScheduler<'a> {
         self.processes.push(process);
     }
 
-    pub unsafe fn run(&mut self) -> ! {
+    pub unsafe fn run<F>(&mut self, atomic: F) -> !
+    where
+        F: FnOnce(),
+    {
         debug!("Running scheduler...");
 
         if self.processes.is_empty() {
@@ -44,15 +47,8 @@ impl<'a> SoosScheduler<'a> {
 
         while match self.processes.first().unwrap().state {
             ProcessState::Running => unreachable!(),
-            ProcessState::Waiting(WaitingState::Timer(ts)) => {
-                if TIMER0.ticks() > ts {
-                    true
-                } else {
-                    false
-                }
-            }
-            ProcessState::Ready => true,
-            _ => false,
+            ProcessState::Waiting(WaitingState::Timer(ts)) => TIMER0.ticks() < ts,
+            ProcessState::Ready => false,
         } {
             self.processes.rotate_left(1);
         }
@@ -63,7 +59,7 @@ impl<'a> SoosScheduler<'a> {
             "Running process {:?}...",
             (&mut *self.current_process.unwrap()).pid
         );
-        self.current_process.unwrap().as_mut().unwrap().run();
+        self.current_process.unwrap().as_mut().unwrap().run(atomic);
     }
 
     pub unsafe fn sleep(&mut self, ms: u64) {

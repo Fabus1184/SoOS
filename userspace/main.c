@@ -12,8 +12,8 @@ void test() {
 }
 
 void _start() {
-    // uint64_t pid = getpid();
-    // MESSAGE[0] = int_to_char((uint8_t)pid);
+    uint64_t pid = getpid();
+    MESSAGE[0] = int_to_char((uint8_t)pid);
 
     while (1) {
         print(MESSAGE);

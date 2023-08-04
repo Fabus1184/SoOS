@@ -162,7 +162,9 @@ unsafe extern "C" fn _start() -> ! {
             .as_mut()
             .map(|paging| paging.load())
             .expect("Kernel paging not initialized!");
-        SCHEDULER.inner_unsafe().schedule(process);
+        SCHEDULER
+            .with_locked(|s| s.schedule(process))
+            .expect("Failed to schedule process!");
     }
     /*{
         let process = Process::from_elf_bytes(
@@ -184,7 +186,8 @@ unsafe extern "C" fn _start() -> ! {
         SCHEDULER.schedule(process);
     }*/
 
-    SCHEDULER.inner_unsafe().run();
+    let s = SCHEDULER.lock_spin();
+    s.run(|| SCHEDULER.unlock());
 }
 
-static mut SCHEDULER: SoosScheduler = SoosScheduler::new();
+static mut SCHEDULER: Spinlock<SoosScheduler> = Spinlock::new(SoosScheduler::new());

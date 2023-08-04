@@ -35,7 +35,7 @@ impl Pid {
 }
 
 pub struct Process<'a> {
-    paging: SoosPaging<'a>,
+    pub paging: SoosPaging<'a>,
     pub stack: InterruptStackFrameValue,
     pub state: ProcessState,
     pub pid: Pid,
@@ -130,7 +130,15 @@ impl<'a> Process<'a> {
         }
     }
 
-    pub unsafe fn run(&mut self) -> ! {
+    pub unsafe fn run<F>(&mut self, atomic: F) -> !
+    where
+        F: FnOnce(),
+    {
+        trace!("Disabling interrupts...");
+        asm!("cli");
+
+        atomic();
+
         trace!("loading process paging...");
         self.paging.load();
 

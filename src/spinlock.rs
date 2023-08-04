@@ -16,6 +16,20 @@ impl<T> Spinlock<T> {
         }
     }
 
+    pub fn with_locked<F, R>(&mut self, f: F) -> Option<R>
+    where
+        F: FnOnce(&mut T) -> R,
+    {
+        self.try_lock().map(f).and_then(|r| {
+            self.unlock();
+            Some(r)
+        })
+    }
+
+    pub unsafe fn as_mut_unchecked(&mut self) -> &mut T {
+        &mut self.inner
+    }
+
     pub fn lock_spin(&mut self) -> &mut T {
         while self
             .lock
@@ -38,9 +52,5 @@ impl<T> Spinlock<T> {
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .ok()
             .map(|_| &mut self.inner)
-    }
-
-    pub unsafe fn inner_unsafe(&self) -> &mut T {
-        &mut self.inner
     }
 }
