@@ -39,7 +39,7 @@ x86_64 operating system written in Rust.
 - [ ] File System Drivers
 - [ ] Networking
 - [ ] ACPI
-- [ ] PCI
+- [ ] PCI (discovering devices somewhat working)
 - [ ] USB
 
 ### Meta
@@ -48,3 +48,8 @@ x86_64 operating system written in Rust.
 - [ ] CI
 - [ ] More careful / isolated use of `unsafe`
 - [ ] GCC real cross-compilation
+
+## "inspirational" screenshots
+
+![image](https://github.com/Fabus1184/SoOS/assets/43907020/ab4bbbbc-88f0-48bc-a710-2aa0430c8d1a)
+

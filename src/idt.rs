@@ -90,6 +90,7 @@ pub extern "C" fn syscall_handler(rax: u64, rbx: u64, rcx: u64, stack_frame: Int
             "mov fs, ax",
             "mov gs, ax",
             "iretq",
+            // TODO: richtig machen
             ucs = in(reg) 0x1b,
             uds = in(reg) 0x23,
             stack_pointer = in(reg) stack_frame.stack_pointer.as_u64(),
