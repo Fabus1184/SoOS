@@ -5,19 +5,17 @@ use alloc::string::String;
 
 use crate::term::TERM;
 
-static mut PANIC_STRING: String = String::new();
-
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     unsafe { asm!("cli") }
 
     unsafe {
-        PANIC_STRING = String::from_raw_parts(0x10000 as *mut u8, 0, 2048);
-
         TERM.fg = 0xFFF87060;
         TERM.println("\nAllahkaputtputt!!");
-        write!(&mut PANIC_STRING, "{}", info).unwrap();
-        TERM.println(&PANIC_STRING);
+
+        let mut panic_buf = String::new();
+        write!(&mut panic_buf, "{}", info).unwrap();
+        TERM.println(&panic_buf);
     };
 
     loop {

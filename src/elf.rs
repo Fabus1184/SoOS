@@ -1,4 +1,5 @@
 use elf_rs::{Elf, ElfFile, ProgramHeaderFlags, ProgramType};
+use log::{info, warn};
 use x86_64::{
     structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
     VirtAddr,
@@ -33,12 +34,17 @@ pub fn load(
             let start_page = Page::containing_address(code_address + ph.vaddr());
             let end_page = Page::containing_address(code_address + ph.vaddr() + ph.memsz());
 
-            let mut flags = PageTableFlags::PRESENT
+            info!(
+                "Mapping pages [{:#0x} - {:#0x}] to [{:#0x}]",
+                start_page.start_address(),
+                end_page.start_address(),
+                code_address + ph.vaddr()
+            );
+
+            let flags = PageTableFlags::PRESENT
                 | PageTableFlags::USER_ACCESSIBLE
-                | PageTableFlags::WRITABLE;
-            if !ph.flags().contains(ProgramHeaderFlags::EXECUTE) {
-                flags |= PageTableFlags::NO_EXECUTE;
-            }
+                | PageTableFlags::WRITABLE
+                | PageTableFlags::NO_EXECUTE;
 
             for page in Page::range_inclusive(start_page, end_page) {
                 let frame = frame_allocator
@@ -62,7 +68,7 @@ pub fn load(
                 )
             };
         }
-        _ => {}
+        s => warn!("Skipping program header: {:?}", s),
     });
 
     elf.section_header_iter().for_each(|sh| match sh.sh_type() {
@@ -88,20 +94,11 @@ pub fn load(
                 };
             }
         }
-        _ => {
-            /* printk!(
-                "Ignoring section header: {:?}",
-                sh.section_name()
-                    .expect("Failed to get name!")
-                    .into_iter()
-                    .map(|&c| c as char)
-                    .collect::<alloc::string::String>()
-            ); */
-        }
+        _ => {}
     });
 
-    elf.program_header_iter().for_each(|ph| match ph.ph_type() {
-        ProgramType::LOAD => {
+    elf.program_header_iter().for_each(|ph| {
+        if let ProgramType::LOAD = ph.ph_type() {
             let start_page = Page::<Size4KiB>::containing_address(code_address + ph.vaddr());
             let end_page = Page::containing_address(code_address + ph.vaddr() + ph.memsz());
 
@@ -123,7 +120,6 @@ pub fn load(
                 };
             }
         }
-        _ => {}
     });
 
     code_address + elf.entry_point()

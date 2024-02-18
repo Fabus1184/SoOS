@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-use log::{info, trace, warn};
+use log::{info, trace};
 use x86_64::{
     set_general_handler,
     structures::{
@@ -10,10 +10,7 @@ use x86_64::{
     VirtAddr,
 };
 
-use crate::{
-    driver, syscall::Syscall, KERNEL_CODE_SEGMENT, KERNEL_PAGING, KERNEL_STACK,
-    KERNEL_STACK_SEGMENT, SCHEDULER,
-};
+use crate::{driver, term::TERM};
 
 pub static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
@@ -51,85 +48,56 @@ pub fn load_idt() {
         IDT.vmm_communication_exception
             .set_handler_fn(vmm_communication_exception_handler);
 
-        set_general_handler!(&mut IDT, irq_handler, 32..=47);
+        set_general_handler!(&mut IDT, irq_handler, 32..=64);
 
         IDT[0x80]
-            .set_handler_addr(VirtAddr::new(syscall_handler_asm_stub as u64))
+            .set_handler_addr(VirtAddr::new(syscall_handler_asm_stub as usize as u64))
             .set_privilege_level(x86_64::PrivilegeLevel::Ring3);
 
         IDT.load();
     }
 }
 
-extern "x86-interrupt" {
+extern "C" {
     fn syscall_handler_asm_stub();
 }
 
-/*
-extern "C" fn _run_scheduler() {
-    unsafe { SCHEDULER.run().expect("failed to run scheduler") };
-}
-
-fn run_scheduler() -> Option<!> {
-    trace!("run_scheduler: loading kernel paging");
-    unsafe {
-        KERNEL_PAGING
-            .as_mut()
-            .expect("kernel paging not set")
-            .load()
-    };
-
-    if unsafe { !SCHEDULER.running() } {
-        unsafe {
-            asm!(
-                "push {kds:r}",
-                "push {stack:r}",
-                "push {rflags:r}",
-                "push {kcs:r}",
-                "push {func:r}",
-                "mov ax, {kds:x}",
-                "mov ds, ax",
-                "mov es, ax",
-                "mov fs, ax",
-                "mov gs, ax",
-                "iretq",
-                kds = in(reg) (KERNEL_STACK_SEGMENT.expect("kernel stack segment not set").index() * 8) | 0,
-                kcs = in(reg) (KERNEL_CODE_SEGMENT.expect("kernel code segment not set").index() * 8) | 0,
-                // out("ax") _,
-                stack = in(reg) KERNEL_STACK.as_mut_ptr() as u64 + KERNEL_STACK.len() as u64,
-                rflags = in(reg) 0x202,
-                func = in(reg) _run_scheduler as u64,
-                options(noreturn),
-            )
-        };
-    } else {
-        None
-    }
-}*/
-
 #[no_mangle]
-pub extern "C" fn syscall_handler(rax: u64, rbx: u64, stack_frame: InterruptStackFrame) {
-    trace!(
-        "syscall_handler: rax {:?}, rbx {:?}, stack_frame {:?}",
-        rax,
-        rbx,
-        stack_frame
-    );
+pub extern "C" fn syscall_handler(rax: u64, rbx: u64, rcx: u64, stack_frame: InterruptStackFrame) {
+    match rax {
+        0 => {
+            // print
+            let str = unsafe { core::slice::from_raw_parts(rbx as *const u8, rcx as usize) };
+            let str = core::str::from_utf8(str).expect("invalid utf8");
+            unsafe { TERM.print(str) };
+        }
+        n => {
+            info!("syscall_handler: unknown syscall: {:#x}", n);
+        }
+    }
 
     unsafe {
-        SCHEDULER
-            .try_lock()
-            .map(|s| {
-                s.update_current_process_stack_frame(&stack_frame);
-
-                Syscall::from_regs(rax, rbx)
-                    .expect("failed to read syscall from registers")
-                    .execute(s);
-
-                s.run(|| SCHEDULER.unlock());
-            })
-            .expect("syscall_handler: failed to lock scheduler");
-    };
+        asm!(
+            "cli",
+            "push {uds:r}",
+            "push {stack_pointer:r}",
+            "push {rflags:r}",
+            "push {ucs:r}",
+            "push {instruction_pointer:r}",
+            "mov ax, {uds:x}",
+            "mov ds, ax",
+            "mov es, ax",
+            "mov fs, ax",
+            "mov gs, ax",
+            "iretq",
+            ucs = in(reg) 0x1b,
+            uds = in(reg) 0x23,
+            stack_pointer = in(reg) stack_frame.stack_pointer.as_u64(),
+            rflags = in(reg) 0x202,
+            instruction_pointer = in(reg) stack_frame.instruction_pointer.as_u64(),
+            options(noreturn)
+        );
+    }
 }
 
 fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u64>) {
@@ -140,29 +108,17 @@ fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u6
     match irq {
         0 => unsafe {
             driver::i8253::TIMER0.tick();
-
-            SCHEDULER
-                .with_locked(|s| {
-                    s.update_current_process_stack_frame(&stack_frame);
-                    s.run(|| {
-                        crate::pic::eoi(irq);
-                        SCHEDULER.unlock();
-                    });
-                })
-                .unwrap_or_else(|| warn!("irq_handler: failed to lock scheduler"));
         },
         1 => unsafe {
             let scancode: u8 = PortRead::read_from_port(0x60);
             info!("scancode: {}", scancode);
-            crate::pic::eoi(irq);
         },
         _ => {
             info!("irq: {}", irq);
-            crate::pic::eoi(irq);
         }
     }
 
-    trace!("irq_handler: end");
+    crate::pic::eoi(irq);
 }
 
 extern "x86-interrupt" fn alignment_check_handler(stack_frame: InterruptStackFrame, err: u64) {
@@ -204,7 +160,7 @@ extern "x86-interrupt" fn general_protection_fault_handler(
     err: u64,
 ) {
     panic!(
-        "EXCEPTION: GENERAL PROTECTION FAULT {:#?}\n Error code: {}",
+        "EXCEPTION: GENERAL PROTECTION FAULT {:#x?}\n Error code: {}",
         stack_frame, err
     );
 }

@@ -7,37 +7,35 @@ extern crate alloc;
 
 mod driver;
 mod elf;
-mod fifo;
 mod font;
 mod idt;
 mod kernel;
-mod logger;
 mod pic;
-mod process;
-mod scheduler;
-mod spinlock;
 mod stuff;
-mod syscall;
 mod term;
 
-use fifo::BoundedAtomicFifo;
-use log::info;
+use core::arch::asm;
 
-use spinlock::Spinlock;
+use include_bytes_aligned::include_bytes_aligned;
+use log::{info, LevelFilter};
+
 use x86_64::{
     instructions::tables,
     registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
     structures::{
-        gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
+        gdt::{Descriptor, GlobalDescriptorTable},
+        paging::{FrameAllocator, Mapper, Page, PageSize, PageTableFlags, Size4KiB},
         tss::TaskStateSegment,
     },
     VirtAddr,
 };
 
 use crate::{
-    kernel::paging::{self, SoosFrameAllocator, SoosPaging},
-    process::Process,
-    scheduler::SoosScheduler,
+    driver::i8253,
+    kernel::{
+        logger::KernelLogger,
+        paging::{self, SoosFrameAllocator, SoosPaging},
+    },
     stuff::memmap::SoosMemmap,
     term::TERM,
 };
@@ -53,11 +51,6 @@ static HHDM_REQUEST: limine::HhdmRequest = limine::HhdmRequest::new(0);
 
 const KERNEL_STACK_SIZE: usize = 4192 * 100;
 static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
-
-static mut KERNEL_PAGING: Option<SoosPaging> = None;
-
-static mut KERNEL_STACK_SEGMENT: Option<SegmentSelector> = None;
-static mut KERNEL_CODE_SEGMENT: Option<SegmentSelector> = None;
 
 #[no_mangle]
 unsafe extern "C" fn _start() -> ! {
@@ -78,9 +71,6 @@ unsafe extern "C" fn _start() -> ! {
     let ucs = GDT.add_entry(Descriptor::user_code_segment());
     let uds = GDT.add_entry(Descriptor::user_data_segment());
     let tss = GDT.add_entry(Descriptor::tss_segment(&TSS));
-
-    KERNEL_STACK_SEGMENT = Some(ds);
-    KERNEL_CODE_SEGMENT = Some(cs);
 
     GDT.load();
 
@@ -115,79 +105,102 @@ unsafe extern "C" fn _start() -> ! {
 
     let memmap = SoosMemmap::from(limine_memmap);
 
-    let mut frame_allocator = SoosFrameAllocator::get_or_init_with_current_pagetable(memmap);
+    let frame_allocator = SoosFrameAllocator::get_or_init_with_current_pagetable(memmap);
 
     let kernel_page_table = paging::current_page_table();
-    KERNEL_PAGING = Some(SoosPaging::offset_page_table(
-        hhdm.offset,
-        &mut *kernel_page_table,
-    ));
+    let mut paging = SoosPaging::offset_page_table(hhdm.offset, &mut *kernel_page_table);
 
     // no allocation before this point!
-    kernel::allocator::init_kernel_heap(
-        KERNEL_PAGING.as_mut().expect("Failed to init kernel heap!"),
-        &mut frame_allocator,
-    )
-    .expect("Failed to init kernel heap!");
+    kernel::allocator::init_kernel_heap(&mut paging, frame_allocator)
+        .expect("Failed to init kernel heap!");
 
-    log::set_logger(&logger::KernelLogger {}).expect("Failed to set logger!");
-    log::set_max_level(log::LevelFilter::Trace);
+    KernelLogger::new(LevelFilter::Info).init();
+
     info!("Logger initialized!");
 
     idt::load_idt();
     pic::init();
 
-    driver::i8253::TIMER0.init(
+    i8253::TIMER0.init(
         10,
-        driver::i8253::Channel::CH0,
-        driver::i8253::AccessMode::LoHiByte,
-        driver::i8253::OperatingMode::RateGenerator,
-        driver::i8253::BCDMode::Binary,
+        i8253::Channel::CH0,
+        i8253::AccessMode::LoHiByte,
+        i8253::OperatingMode::RateGenerator,
+        i8253::BCDMode::Binary,
     );
 
-    {
-        let process = Process::from_elf_bytes(
-            include_bytes!("../userspace/main.elf"),
-            hhdm.offset,
-            kernel_page_table,
-            frame_allocator,
-            ucs,
-            uds,
-            VirtAddr::new(0x0000_5555_ABBA_0000),
-            VirtAddr::new(0x0000_5555_ACDC_0000),
-            100,
-        );
-        info!("Process {:?} loaded!", process.pid);
-        KERNEL_PAGING
-            .as_mut()
-            .map(|paging| paging.load())
-            .expect("Kernel paging not initialized!");
-        SCHEDULER
-            .with_locked(|s| s.schedule(process))
-            .expect("Failed to schedule process!");
+    x86_64::instructions::interrupts::enable();
+
+    let rip = x86_64::registers::read_rip();
+    info!("RIP: {:#x}", rip);
+    let mut rsp: u64;
+    asm!("mov {}, rsp", out(reg) rsp);
+    info!("RSP: {:#x}", rsp);
+
+    info!(
+        "User code segment: {:#x}, user data segment: {:#x}",
+        ucs.0, uds.0
+    );
+
+    driver::pci::scan()
+        .expect("Failed to scan PCI devices!")
+        .into_iter()
+        .for_each(|dev| {
+            info!(
+                "Found PCI device: bus {} device {} function {} class {:?}",
+                dev.bus, dev.device, dev.function, dev.header.class
+            );
+        });
+
+    let userspace_address = elf::load(
+        &mut paging,
+        frame_allocator,
+        include_bytes_aligned!(32, "../userspace/build/test"),
+        VirtAddr::new(0x0000_1234_0000_0000),
+    );
+
+    info!("ELF loaded at {:?}", userspace_address);
+
+    let stack_size_pages = 10;
+    let stack_address = VirtAddr::new(0x0000_1000_0000_0000);
+    for i in 0..stack_size_pages {
+        let page = Page::containing_address(stack_address + i * Size4KiB::SIZE);
+        let frame = frame_allocator
+            .allocate_frame()
+            .expect("Failed to allocate frame!");
+        let flags = PageTableFlags::PRESENT
+            | PageTableFlags::WRITABLE
+            | PageTableFlags::USER_ACCESSIBLE
+            | PageTableFlags::NO_EXECUTE;
+        unsafe {
+            paging
+                .offset_page_table
+                .map_to(page, frame, flags, frame_allocator)
+                .expect("Failed to map page!")
+                .flush()
+        };
     }
-    /*{
-        let process = Process::from_elf_bytes(
-            include_bytes!("../userspace/main.elf"),
-            hhdm.offset,
-            kernel_page_table,
-            frame_allocator,
-            ucs,
-            uds,
-            VirtAddr::new(0x0000_4444_ABBA_0000),
-            VirtAddr::new(0x0000_4444_ACDC_0000),
-            100,
-        );
-        info!("Process {:?} loaded!", process.pid);
-        KERNEL_PAGING
-            .as_mut()
-            .map(|paging| paging.load())
-            .expect("Kernel paging not initialized!");
-        SCHEDULER.schedule(process);
-    }*/
+    let stack_pointer = stack_address + stack_size_pages * Size4KiB::SIZE - 0x100_u64;
 
-    let s = SCHEDULER.lock_spin();
-    s.run(|| SCHEDULER.unlock());
+    // jump to userspace
+    asm!(
+        "cli",
+        "push {uds:r}",
+        "push {stack_pointer:r}",
+        "push {rflags:r}",
+        "push {ucs:r}",
+        "push {instruction_pointer:r}",
+        "mov ax, {uds:x}",
+        "mov ds, ax",
+        "mov es, ax",
+        "mov fs, ax",
+        "mov gs, ax",
+        "iretq",
+        uds = in(reg) uds.0,
+        ucs = in(reg) ucs.0,
+        stack_pointer = in(reg) stack_pointer.as_u64(),
+        rflags = in(reg) 0x202,
+        instruction_pointer = in(reg) userspace_address.as_u64(),
+        options(noreturn)
+    );
 }
-
-static mut SCHEDULER: Spinlock<SoosScheduler> = Spinlock::new(SoosScheduler::new());

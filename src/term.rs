@@ -46,7 +46,7 @@ impl Term {
     }
 
     pub fn blit(&self, x: u64, y: u64, color: u32) {
-        if x >= self.framebuffer.width as u64 || y >= self.framebuffer.height as u64 {}
+        //if x >= self.framebuffer.width as u64 || y >= self.framebuffer.height as u64 {}
 
         let fb_ptr = self.framebuffer.address.as_ptr().unwrap() as *mut u32;
 

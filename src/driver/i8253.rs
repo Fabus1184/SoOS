@@ -124,7 +124,7 @@ impl Timer {
         while unsafe { core::ptr::read_volatile(&self.ticks) } < start + ticks {}
     }
 
-    pub fn get_counter(&self) -> u16 {
+    pub fn counter(&self) -> u16 {
         let data_port = match self.channel {
             Channel::CH0 => 0x40,
             Channel::CH1 => 0x41,
@@ -155,7 +155,7 @@ impl Timer {
         }
     }
 
-    pub fn get_time(&self) -> core::time::Duration {
+    pub fn time(&self) -> core::time::Duration {
         core::time::Duration::from_millis(
             (self.ticks as f64 / self.frequency as f64 * 1000.0) as u64,
         )
