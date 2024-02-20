@@ -1,6 +1,6 @@
-use core::arch::asm;
+use core::time::Duration;
 
-use log::{info, trace};
+use log::{debug, error, info, trace};
 use x86_64::{
     set_general_handler,
     structures::{
@@ -10,7 +10,11 @@ use x86_64::{
     VirtAddr,
 };
 
-use crate::{driver, term::TERM};
+use crate::{
+    driver::{self, i8253::TIMER0},
+    process::{self, ProcessState, CURRENT_PROCESS, PROCESSES},
+    term::TERM,
+};
 
 pub static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
@@ -48,7 +52,22 @@ pub fn load_idt() {
         IDT.vmm_communication_exception
             .set_handler_fn(vmm_communication_exception_handler);
 
-        set_general_handler!(&mut IDT, irq_handler, 32..=64);
+        IDT[0x20].set_handler_addr(VirtAddr::new(irq0 as usize as u64));
+        IDT[0x21].set_handler_addr(VirtAddr::new(irq1 as usize as u64));
+        IDT[0x22].set_handler_addr(VirtAddr::new(irq2 as usize as u64));
+        IDT[0x23].set_handler_addr(VirtAddr::new(irq3 as usize as u64));
+        IDT[0x24].set_handler_addr(VirtAddr::new(irq4 as usize as u64));
+        IDT[0x25].set_handler_addr(VirtAddr::new(irq5 as usize as u64));
+        IDT[0x26].set_handler_addr(VirtAddr::new(irq6 as usize as u64));
+        IDT[0x27].set_handler_addr(VirtAddr::new(irq7 as usize as u64));
+        IDT[0x28].set_handler_addr(VirtAddr::new(irq8 as usize as u64));
+        IDT[0x29].set_handler_addr(VirtAddr::new(irq9 as usize as u64));
+        IDT[0x2a].set_handler_addr(VirtAddr::new(irq10 as usize as u64));
+        IDT[0x2b].set_handler_addr(VirtAddr::new(irq11 as usize as u64));
+        IDT[0x2c].set_handler_addr(VirtAddr::new(irq12 as usize as u64));
+        IDT[0x2d].set_handler_addr(VirtAddr::new(irq13 as usize as u64));
+        IDT[0x2e].set_handler_addr(VirtAddr::new(irq14 as usize as u64));
+        IDT[0x2f].set_handler_addr(VirtAddr::new(irq15 as usize as u64));
 
         IDT[0x80]
             .set_handler_addr(VirtAddr::new(syscall_handler_asm_stub as usize as u64))
@@ -60,66 +79,140 @@ pub fn load_idt() {
 
 extern "C" {
     fn syscall_handler_asm_stub();
+    fn irq0();
+    fn irq1();
+    fn irq2();
+    fn irq3();
+    fn irq4();
+    fn irq5();
+    fn irq6();
+    fn irq7();
+    fn irq8();
+    fn irq9();
+    fn irq10();
+    fn irq11();
+    fn irq12();
+    fn irq13();
+    fn irq14();
+    fn irq15();
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct Registers {
+    rax: u64,
+    rbx: u64,
+    rcx: u64,
+    rdx: u64,
+    rsi: u64,
+    rdi: u64,
+    rbp: u64,
+}
+
+unsafe fn store_process_state(registers: Registers, stack_frame: InterruptStackFrame) {
+    {
+        let mut processes = PROCESSES.lock();
+        let current_pid = CURRENT_PROCESS.load(core::sync::atomic::Ordering::Relaxed);
+        if let Some(current) = processes.iter_mut().find(|p| p.pid == current_pid) {
+            current.state = ProcessState {
+                rax: registers.rax,
+                rbx: registers.rbx,
+                rcx: registers.rcx,
+                rdx: registers.rdx,
+                rsi: registers.rsi,
+                rdi: registers.rdi,
+                rsp: stack_frame.stack_pointer.as_u64(),
+                rbp: registers.rbp,
+                rip: stack_frame.instruction_pointer.as_u64(),
+                flags: stack_frame.cpu_flags,
+                ss: stack_frame.stack_segment,
+                cs: stack_frame.code_segment,
+            };
+        }
+    }
 }
 
 #[no_mangle]
-pub extern "C" fn syscall_handler(rax: u64, rbx: u64, rcx: u64, stack_frame: InterruptStackFrame) {
-    match rax {
+pub unsafe extern "C" fn syscall_handler(
+    _rdi: u64,
+    _rsi: u64,
+    _rdx: u64,
+    _rcx: u64,
+    _r8: u64,
+    _r9: u64,
+    registers: Registers,
+    stack_frame: InterruptStackFrame,
+) {
+    unsafe { store_process_state(registers, stack_frame) };
+
+    match registers.rax {
         0 => {
+            trace!(
+                "syscall_handler: print {:#x} {:#x}",
+                registers.rbx,
+                registers.rcx
+            );
+
             // print
-            let str = unsafe { core::slice::from_raw_parts(rbx as *const u8, rcx as usize) };
+            let str = unsafe {
+                core::slice::from_raw_parts(registers.rbx as *const u8, registers.rcx as usize)
+            };
             let str = core::str::from_utf8(str).expect("invalid utf8");
             unsafe { TERM.print(str) };
         }
+        1 => {
+            // sleep for rax ms
+            trace!("syscall_handler: sleep {:#x}", registers.rbx);
+
+            let mut processes = PROCESSES.lock();
+            if let Some(process) = processes
+                .iter_mut()
+                .find(|p| p.pid == CURRENT_PROCESS.load(core::sync::atomic::Ordering::Relaxed))
+            {
+                process.sleep = Some(TIMER0.time() + Duration::from_millis(registers.rbx));
+            }
+        }
         n => {
-            info!("syscall_handler: unknown syscall: {:#x}", n);
+            error!("syscall_handler: unknown syscall: {:#x}", n);
         }
     }
 
-    unsafe {
-        asm!(
-            "cli",
-            "push {uds:r}",
-            "push {stack_pointer:r}",
-            "push {rflags:r}",
-            "push {ucs:r}",
-            "push {instruction_pointer:r}",
-            "mov ax, {uds:x}",
-            "mov ds, ax",
-            "mov es, ax",
-            "mov fs, ax",
-            "mov gs, ax",
-            "iretq",
-            // TODO: richtig machen
-            ucs = in(reg) 0x1b,
-            uds = in(reg) 0x23,
-            stack_pointer = in(reg) stack_frame.stack_pointer.as_u64(),
-            rflags = in(reg) 0x202,
-            instruction_pointer = in(reg) stack_frame.instruction_pointer.as_u64(),
-            options(noreturn)
-        );
-    }
+    process::schedule();
 }
 
-fn irq_handler(stack_frame: InterruptStackFrame, irq: u8, _error_code: Option<u64>) {
+#[no_mangle]
+pub extern "C" fn irq_handler(
+    _rdi: u64,
+    _rsi: u64,
+    _rdx: u64,
+    _rcx: u64,
+    _r8: u64,
+    _r9: u64,
+    registers: Registers,
+    irq: u8,
+    stack_frame: InterruptStackFrame,
+) {
     trace!("irq_handler: irq {:?}, stack_frame {:?}", irq, stack_frame);
 
-    let irq = irq - 32;
+    unsafe { store_process_state(registers, stack_frame) };
 
     match irq {
         0 => unsafe {
             driver::i8253::TIMER0.tick();
+            trace!("timer tick");
         },
         1 => unsafe {
             let scancode: u8 = PortRead::read_from_port(0x60);
-            info!("scancode: {}", scancode);
+            debug!("scancode: {}", scancode);
         },
         _ => {
-            info!("irq: {}", irq);
+            debug!("irq: {}", irq);
         }
     }
 
     crate::pic::eoi(irq);
+
+    unsafe { process::schedule() };
 }
 
 extern "x86-interrupt" fn alignment_check_handler(stack_frame: InterruptStackFrame, err: u64) {
@@ -194,7 +287,7 @@ extern "x86-interrupt" fn page_fault_handler(
     err: PageFaultErrorCode,
 ) {
     panic!(
-        "EXCEPTION: PAGE FAULT {:#?}\n Error code: {:?}",
+        "EXCEPTION: PAGE FAULT {:#x?}\n Error code: {:?}",
         stack_frame, err
     );
 }

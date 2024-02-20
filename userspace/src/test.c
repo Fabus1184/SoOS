@@ -3,6 +3,7 @@
 
 enum SYSCALL {
     SYSCALL_PRINT = 0,
+    SYSCALL_SLEEP = 1,
 };
 
 int syscall(enum SYSCALL syscall, ...) {
@@ -15,13 +16,25 @@ int syscall(enum SYSCALL syscall, ...) {
         char *str = va_arg(args, char *);
         uint64_t len = va_arg(args, uint64_t);
 
-        asm volatile("mov $0, %%rax\n"
+        asm volatile("mov %[syscall], %%rax\n"
                      "mov %[str], %%rbx\n"
                      "mov %[len], %%rcx\n"
                      "int $0x80\n"
                      : "=a"(ret)
-                     : [str] "m"(str), [len] "m"(len)
+                     : [syscall] "m"(syscall), [str] "m"(str), [len] "m"(len)
                      : "rbx", "rcx");
+
+        break;
+    }
+    case SYSCALL_SLEEP: {
+        uint64_t ms = va_arg(args, uint64_t);
+
+        asm volatile("mov %[syscall], %%rax\n"
+                     "mov %[ms], %%rbx\n"
+                     "int $0x80\n"
+                     : "=a"(ret)
+                     : [syscall] "m"(syscall), [ms] "m"(ms)
+                     : "rbx");
 
         break;
     }
@@ -61,7 +74,7 @@ void itoa(int value, char *str) {
     }
 }
 
-int strlen(const char *str) {
+uint64_t strlen(const char *str) {
     int len = 0;
     while (str[len] != '\0') {
         len++;
@@ -70,6 +83,7 @@ int strlen(const char *str) {
 }
 
 void print(const char *str) { syscall(SYSCALL_PRINT, str, strlen(str)); }
+void sleep(uint64_t ms) { syscall(SYSCALL_SLEEP, ms); }
 
 void _start() {
     print("Hello from userspace!\n");
@@ -84,7 +98,11 @@ void _start() {
         int tmp = a;
         a = b;
         b = tmp + b;
+
+        sleep(500);
     }
+
+    print("Goodbye from userspace!\n");
 
     while (1) {
         asm volatile("nop");

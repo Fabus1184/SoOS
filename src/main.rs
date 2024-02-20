@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(abi_x86_interrupt)]
 #![feature(stmt_expr_attributes)]
+#![feature(never_type)]
 
 extern crate alloc;
 
@@ -11,6 +12,7 @@ mod font;
 mod idt;
 mod kernel;
 mod pic;
+mod process;
 mod stuff;
 mod term;
 
@@ -36,6 +38,7 @@ use crate::{
         logger::KernelLogger,
         paging::{self, SoosFrameAllocator, SoosPaging},
     },
+    process::{Process, PROCESSES},
     stuff::memmap::SoosMemmap,
     term::TERM,
 };
@@ -50,19 +53,20 @@ static PAGING_MODE_REQUEST: limine::PagingModeRequest =
 static HHDM_REQUEST: limine::HhdmRequest = limine::HhdmRequest::new(0);
 
 const KERNEL_STACK_SIZE: usize = 4192 * 100;
-static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
+pub static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
 
 #[no_mangle]
 unsafe extern "C" fn _start() -> ! {
+    let kernel_stack_pointer = KERNEL_STACK.as_mut_ptr() as u64 + KERNEL_STACK.len() as u64;
+
     static mut TSS: TaskStateSegment = TaskStateSegment::new();
     TSS.privilege_stack_table = [
-        VirtAddr::new(KERNEL_STACK.as_mut_ptr() as u64 + KERNEL_STACK.len() as u64),
+        VirtAddr::new(kernel_stack_pointer),
         VirtAddr::zero(),
         VirtAddr::zero(),
     ];
     for i in 0..7 {
-        TSS.interrupt_stack_table[i] =
-            VirtAddr::new(KERNEL_STACK.as_mut_ptr() as u64 + KERNEL_STACK.len() as u64);
+        TSS.interrupt_stack_table[i] = VirtAddr::new(kernel_stack_pointer);
     }
 
     static mut GDT: GlobalDescriptorTable = GlobalDescriptorTable::new();
@@ -114,7 +118,7 @@ unsafe extern "C" fn _start() -> ! {
     kernel::allocator::init_kernel_heap(&mut paging, frame_allocator)
         .expect("Failed to init kernel heap!");
 
-    KernelLogger::new(LevelFilter::Info).init();
+    KernelLogger::new(LevelFilter::Debug).init();
 
     info!("Logger initialized!");
 
@@ -128,8 +132,6 @@ unsafe extern "C" fn _start() -> ! {
         i8253::OperatingMode::RateGenerator,
         i8253::BCDMode::Binary,
     );
-
-    x86_64::instructions::interrupts::enable();
 
     let rip = x86_64::registers::read_rip();
     info!("RIP: {:#x}", rip);
@@ -182,25 +184,18 @@ unsafe extern "C" fn _start() -> ! {
     }
     let stack_pointer = stack_address + stack_size_pages * Size4KiB::SIZE - 0x100_u64;
 
-    // jump to userspace
-    asm!(
-        "cli",
-        "push {uds:r}",
-        "push {stack_pointer:r}",
-        "push {rflags:r}",
-        "push {ucs:r}",
-        "push {instruction_pointer:r}",
-        "mov ax, {uds:x}",
-        "mov ds, ax",
-        "mov es, ax",
-        "mov fs, ax",
-        "mov gs, ax",
-        "iretq",
-        uds = in(reg) uds.0,
-        ucs = in(reg) ucs.0,
-        stack_pointer = in(reg) stack_pointer.as_u64(),
-        rflags = in(reg) 0x202,
-        instruction_pointer = in(reg) userspace_address.as_u64(),
-        options(noreturn)
-    );
+    {
+        let mut processes = PROCESSES.lock();
+
+        processes.push(Process::new(
+            1234,
+            userspace_address.as_u64(),
+            stack_pointer.as_u64(),
+            uds.0 as u64,
+            ucs.0 as u64,
+            0x202,
+        ));
+    }
+
+    process::schedule()
 }

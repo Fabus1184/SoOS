@@ -30,8 +30,7 @@ impl SoosMemmap {
             .iter()
             .flatten()
             .filter(|e| e.typ == MemmapEntryType::Usable)
-            .map(|e| e.base..e.base + e.len)
-            .flatten()
+            .flat_map(|e| e.base..e.base + e.len)
     }
 }
 

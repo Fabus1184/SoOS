@@ -18,9 +18,9 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         TERM.println(&panic_buf);
     };
 
-    loop {
-        unsafe {
-            asm!("cli");
+    unsafe {
+        asm!("cli");
+        loop {
             asm!("hlt");
         }
     }

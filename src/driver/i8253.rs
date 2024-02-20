@@ -76,6 +76,8 @@ pub static mut TIMER2: Timer = Timer {
     ticks: 0,
 };
 
+pub type SystemTime = core::time::Duration;
+
 impl Timer {
     pub fn init(
         &mut self,
@@ -155,7 +157,7 @@ impl Timer {
         }
     }
 
-    pub fn time(&self) -> core::time::Duration {
+    pub fn time(&self) -> SystemTime {
         core::time::Duration::from_millis(
             (self.ticks as f64 / self.frequency as f64 * 1000.0) as u64,
         )
