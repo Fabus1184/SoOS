@@ -11,8 +11,7 @@ use crate::stuff::memmap::SoosMemmap;
 
 pub fn current_page_table() -> *mut PageTable {
     let (level_4_table_frame, _flags) = Cr3::read();
-    let level_4_table = level_4_table_frame.start_address().as_u64() as *mut PageTable;
-    level_4_table
+    level_4_table_frame.start_address().as_u64() as *mut PageTable
 }
 
 #[derive(Debug)]
@@ -24,6 +23,7 @@ impl<'a> SoosPaging<'a> {
     pub fn offset_page_table(phys_memory_offset: u64, page_table: &'a mut PageTable) -> Self {
         let offset_page_table =
             unsafe { OffsetPageTable::new(page_table, VirtAddr::new(phys_memory_offset)) };
+
         Self { offset_page_table }
     }
 
@@ -35,6 +35,13 @@ impl<'a> SoosPaging<'a> {
             )),
             flags,
         );
+    }
+
+    pub unsafe fn load_fn(&mut self) -> impl FnOnce() {
+        let flags = Cr3::read().1;
+        let address = self.offset_page_table.level_4_table() as *const _ as u64;
+
+        move || Cr3::write(PhysFrame::containing_address(PhysAddr::new(address)), flags)
     }
 }
 

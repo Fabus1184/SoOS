@@ -4,11 +4,14 @@
 enum SYSCALL {
     SYSCALL_PRINT = 0,
     SYSCALL_SLEEP = 1,
+    SYSCALL_EXIT = 2,
 };
 
-int syscall(enum SYSCALL syscall, ...) {
+int syscall(enum SYSCALL _syscall, ...) {
     va_list args;
-    va_start(args, syscall);
+    va_start(args, _syscall);
+
+    uint64_t syscall = (uint64_t)_syscall;
 
     int ret = -1;
     switch (syscall) {
@@ -34,6 +37,18 @@ int syscall(enum SYSCALL syscall, ...) {
                      "int $0x80\n"
                      : "=a"(ret)
                      : [syscall] "m"(syscall), [ms] "m"(ms)
+                     : "rbx");
+
+        break;
+    }
+    case SYSCALL_EXIT: {
+        uint64_t status = va_arg(args, uint64_t);
+
+        asm volatile("mov %[syscall], %%rax\n"
+                     "mov %[status], %%rbx\n"
+                     "int $0x80\n"
+                     : "=a"(ret)
+                     : [syscall] "m"(syscall), [status] "m"(status)
                      : "rbx");
 
         break;
@@ -84,6 +99,7 @@ uint64_t strlen(const char *str) {
 
 void print(const char *str) { syscall(SYSCALL_PRINT, str, strlen(str)); }
 void sleep(uint64_t ms) { syscall(SYSCALL_SLEEP, ms); }
+void exit(uint64_t status) { syscall(SYSCALL_EXIT, status); }
 
 void _start() {
     print("Hello from userspace!\n");
@@ -104,7 +120,5 @@ void _start() {
 
     print("Goodbye from userspace!\n");
 
-    while (1) {
-        asm volatile("nop");
-    }
+    exit(69420);
 }

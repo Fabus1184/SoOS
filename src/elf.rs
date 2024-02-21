@@ -1,7 +1,7 @@
 use elf_rs::{Elf, ElfFile, ProgramHeaderFlags, ProgramType};
 use log::{info, warn};
 use x86_64::{
-    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
+    structures::paging::{FrameAllocator, Mapper, Page, PageSize, PageTableFlags, Size4KiB},
     VirtAddr,
 };
 
@@ -22,11 +22,14 @@ impl Elf64Rela {
 }
 
 pub fn load(
-    paging: &mut SoosPaging,
+    process_paging: &mut SoosPaging,
+    kernel_paging: &mut SoosPaging,
     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
     bytes: &[u8],
     code_address: VirtAddr,
-) -> VirtAddr {
+) -> (VirtAddr, VirtAddr) {
+    unsafe { process_paging.load() };
+
     let elf = Elf::from_bytes(bytes).expect("Failed to parse ELF!");
 
     elf.program_header_iter().for_each(|ph| match ph.ph_type() {
@@ -52,7 +55,7 @@ pub fn load(
                     .expect("Failed to allocate frame!");
 
                 unsafe {
-                    paging
+                    process_paging
                         .offset_page_table
                         .map_to(page, frame, flags, frame_allocator)
                         .expect("Failed to map page!")
@@ -112,7 +115,7 @@ pub fn load(
 
             for page in Page::range_inclusive(start_page, end_page) {
                 unsafe {
-                    paging
+                    process_paging
                         .offset_page_table
                         .update_flags(page, flags)
                         .expect("Failed to map page!")
@@ -122,5 +125,28 @@ pub fn load(
         }
     });
 
-    code_address + elf.entry_point()
+    let stack_size_pages = 10;
+    let stack_address = VirtAddr::new(0x0000_1000_0000_0000);
+    for i in 0..stack_size_pages {
+        let page = Page::containing_address(stack_address + i * Size4KiB::SIZE);
+        let frame = frame_allocator
+            .allocate_frame()
+            .expect("Failed to allocate frame!");
+        let flags = PageTableFlags::PRESENT
+            | PageTableFlags::WRITABLE
+            | PageTableFlags::USER_ACCESSIBLE
+            | PageTableFlags::NO_EXECUTE;
+        unsafe {
+            process_paging
+                .offset_page_table
+                .map_to(page, frame, flags, frame_allocator)
+                .expect("Failed to map page!")
+                .flush()
+        };
+    }
+    let stack_pointer = stack_address + stack_size_pages * Size4KiB::SIZE - 0x100_u64;
+
+    unsafe { kernel_paging.load() };
+
+    (code_address + elf.entry_point(), stack_pointer)
 }

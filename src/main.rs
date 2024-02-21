@@ -18,6 +18,8 @@ mod term;
 
 use core::arch::asm;
 
+use aligned::{Aligned, A16, A32, A8};
+use alloc::{borrow::ToOwned, format};
 use include_bytes_aligned::include_bytes_aligned;
 use log::{info, LevelFilter};
 
@@ -26,7 +28,7 @@ use x86_64::{
     registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
     structures::{
         gdt::{Descriptor, GlobalDescriptorTable},
-        paging::{FrameAllocator, Mapper, Page, PageSize, PageTableFlags, Size4KiB},
+        paging::{mapper::CleanUp, page::PageRangeInclusive, FrameAllocator, Page, PageTable},
         tss::TaskStateSegment,
     },
     VirtAddr,
@@ -39,7 +41,7 @@ use crate::{
         paging::{self, SoosFrameAllocator, SoosPaging},
     },
     process::{Process, PROCESSES},
-    stuff::memmap::SoosMemmap,
+    stuff::memmap::{MemmapEntryType, SoosMemmap},
     term::TERM,
 };
 
@@ -52,8 +54,21 @@ static PAGING_MODE_REQUEST: limine::PagingModeRequest =
 
 static HHDM_REQUEST: limine::HhdmRequest = limine::HhdmRequest::new(0);
 
+const BANNER: &[&str] = &[
+    r#""#,
+    r#".d88888b            .88888.  .d88888b "#,
+    r#"88.    "'          d8'   `8b 88.    "'"#,
+    r#"`Y88888b. .d8888b. 88     88 `Y88888b."#,
+    r#"      `8b 88'  `88 88     88       `8b"#,
+    r#"d8'   .8P 88.  .88 Y8.   .8P d8'   .8P"#,
+    r#" Y88888P  `88888P'  `8888P'   Y88888P "#,
+    r#""#,
+];
+
 const KERNEL_STACK_SIZE: usize = 4192 * 100;
 pub static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
+
+static mut KERNEL_PAGING: *mut SoosPaging = core::ptr::null_mut();
 
 #[no_mangle]
 unsafe extern "C" fn _start() -> ! {
@@ -112,15 +127,35 @@ unsafe extern "C" fn _start() -> ! {
     let frame_allocator = SoosFrameAllocator::get_or_init_with_current_pagetable(memmap);
 
     let kernel_page_table = paging::current_page_table();
-    let mut paging = SoosPaging::offset_page_table(hhdm.offset, &mut *kernel_page_table);
+    let mut _kernel_paging = SoosPaging::offset_page_table(hhdm.offset, &mut *kernel_page_table);
+    KERNEL_PAGING = &mut _kernel_paging;
+    (*KERNEL_PAGING).load();
+
+    let heap = memmap
+        .iter()
+        .find(|entry| entry.len >= 100 * 1024 * 1024)
+        .expect("Failed to find a suitable heap location!");
 
     // no allocation before this point!
-    kernel::allocator::init_kernel_heap(&mut paging, frame_allocator)
-        .expect("Failed to init kernel heap!");
+    kernel::allocator::init_kernel_heap(heap.base).expect("Failed to init kernel heap!");
 
     KernelLogger::new(LevelFilter::Debug).init();
 
-    info!("Logger initialized!");
+    for line in BANNER {
+        TERM.println(line);
+    }
+    TERM.print("Version ");
+    TERM.println(env!("CARGO_PKG_VERSION"));
+
+    TERM.println("Memory map:");
+    for entry in memmap.iter() {
+        TERM.println(&format!(
+            "  {:#x} {:#} - {:?}",
+            entry.base,
+            byte_unit::Byte::from_u64(entry.len),
+            entry.type_
+        ));
+    }
 
     idt::load_idt();
     pic::init();
@@ -140,8 +175,8 @@ unsafe extern "C" fn _start() -> ! {
     info!("RSP: {:#x}", rsp);
 
     info!(
-        "User code segment: {:#x}, user data segment: {:#x}",
-        ucs.0, uds.0
+        "UCS: {:#x}, UDS: {:#x}, KCS: {:#x}, KDS: {:#x}",
+        ucs.0, uds.0, cs.0, ds.0
     );
 
     driver::pci::scan()
@@ -154,8 +189,26 @@ unsafe extern "C" fn _start() -> ! {
             );
         });
 
-    let userspace_address = elf::load(
-        &mut paging,
+    let process_page_table = frame_allocator
+        .allocate_frame()
+        .expect("Failed to allocate frame!")
+        .start_address()
+        .as_u64() as *mut PageTable;
+
+    (*KERNEL_PAGING)
+        .offset_page_table
+        .level_4_table()
+        .clone_into(&mut *process_page_table);
+
+    info!(
+        "Address of page table: {:#x}",
+        process_page_table as *const _ as u64
+    );
+    let mut process_paging = SoosPaging::offset_page_table(hhdm.offset, &mut *process_page_table);
+
+    let (userspace_address, userspace_stack) = elf::load(
+        &mut process_paging,
+        &mut *KERNEL_PAGING,
         frame_allocator,
         include_bytes_aligned!(32, "../userspace/build/test"),
         VirtAddr::new(0x0000_1234_0000_0000),
@@ -163,34 +216,14 @@ unsafe extern "C" fn _start() -> ! {
 
     info!("ELF loaded at {:?}", userspace_address);
 
-    let stack_size_pages = 10;
-    let stack_address = VirtAddr::new(0x0000_1000_0000_0000);
-    for i in 0..stack_size_pages {
-        let page = Page::containing_address(stack_address + i * Size4KiB::SIZE);
-        let frame = frame_allocator
-            .allocate_frame()
-            .expect("Failed to allocate frame!");
-        let flags = PageTableFlags::PRESENT
-            | PageTableFlags::WRITABLE
-            | PageTableFlags::USER_ACCESSIBLE
-            | PageTableFlags::NO_EXECUTE;
-        unsafe {
-            paging
-                .offset_page_table
-                .map_to(page, frame, flags, frame_allocator)
-                .expect("Failed to map page!")
-                .flush()
-        };
-    }
-    let stack_pointer = stack_address + stack_size_pages * Size4KiB::SIZE - 0x100_u64;
-
     {
         let mut processes = PROCESSES.lock();
 
         processes.push(Process::new(
             1234,
+            Some(process_paging),
             userspace_address.as_u64(),
-            stack_pointer.as_u64(),
+            userspace_stack.as_u64(),
             uds.0 as u64,
             ucs.0 as u64,
             0x202,
