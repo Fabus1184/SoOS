@@ -181,10 +181,10 @@ irq15:
 ;     pub r14: u64,
 ;     pub r15: u64,
 ; }
-; fn run_process(cs: u64, ds: u64, flags: u64, rip: u64, regs: *const GPRegisters) -> !;
+; fn do_iret(cs: u64, ds: u64, flags: u64, rip: u64, regs: *const GPRegisters) -> !;
 ;                rdi    , rsi    , rdx       , rcx     , r8
-global run_process
-run_process:
+global do_iret
+do_iret:
     ; setup iretq
     
     ; push data segment

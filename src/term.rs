@@ -1,8 +1,10 @@
+use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+
 use crate::font::{self, FONT_HEIGHT, FONT_WIDTH};
 
 pub static FRAMEBUFFER_REQUEST: limine::FramebufferRequest = limine::FramebufferRequest::new(0);
 
-pub static mut TERM: once_cell::unsync::Lazy<Term> = once_cell::unsync::Lazy::new(|| {
+pub static TERM: spin::Lazy<Term> = spin::Lazy::new(|| {
     let fbr = FRAMEBUFFER_REQUEST
         .get_response()
         .get()
@@ -12,37 +14,40 @@ pub static mut TERM: once_cell::unsync::Lazy<Term> = once_cell::unsync::Lazy::ne
 });
 
 pub struct Term {
-    x: usize,
-    y: usize,
-    pub fg: u32,
-    pub bg: u32,
+    x: AtomicUsize,
+    y: AtomicUsize,
+    fg: AtomicU32,
+    bg: AtomicU32,
     framebuffer: &'static limine::Framebuffer,
 }
 
 const FONT_SCALE: u64 = 2;
 
-unsafe impl Sync for Term {}
-
 impl Term {
     pub fn new(fb: &'static limine::Framebuffer) -> Term {
         Term {
-            x: 0,
-            y: 0,
-            fg: 0xFFFFFFFF,
-            bg: 0x00000000,
+            x: 0.into(),
+            y: 0.into(),
+            fg: 0xFFFFFFFF.into(),
+            bg: 0x00000000.into(),
             framebuffer: fb,
         }
+    }
+
+    pub fn set_color(&self, fg: u32, bg: u32) {
+        self.fg.store(fg, Ordering::Relaxed);
+        self.bg.store(bg, Ordering::Relaxed);
     }
 
     pub fn clear(&mut self) {
         for x in 0..self.framebuffer.width {
             for y in 0..self.framebuffer.height {
-                self.blit(x, y, self.bg);
+                self.blit(x, y, self.bg.load(Ordering::Relaxed));
             }
         }
 
-        self.x = 0;
-        self.y = 0;
+        self.x.store(0, Ordering::Relaxed);
+        self.y.store(0, Ordering::Relaxed);
     }
 
     pub fn blit(&self, x: u64, y: u64, color: u32) {
@@ -57,59 +62,63 @@ impl Term {
         }
     }
 
-    pub fn print(&mut self, s: &str) {
+    pub fn print(&self, s: &str) {
         for c in s.chars() {
             self.print_char(c);
         }
     }
 
-    pub fn println(&mut self, s: &str) {
+    pub fn println(&self, s: &str) {
         self.print(s);
         self.print_char('\n');
     }
 
-    pub fn print_char(&mut self, c: char) {
+    pub fn print_char(&self, c: char) {
         if c == '\0' {
             return;
         }
 
         if c.is_ascii_graphic() {
-            let x_off = (self.x * FONT_WIDTH) as u64 / FONT_SCALE;
-            let y_off = (self.y * FONT_HEIGHT) as u64 / FONT_SCALE;
+            let x_off = (self.x.load(Ordering::Relaxed) * FONT_WIDTH) as u64 / FONT_SCALE;
+            let y_off = (self.y.load(Ordering::Relaxed) * FONT_HEIGHT) as u64 / FONT_SCALE;
 
             for x in 0..FONT_WIDTH {
                 for y in 0..FONT_HEIGHT {
                     let byte = font::FONT[c as usize - 32][FONT_WIDTH * (y / 8) + x];
                     let bit = (byte >> (y % 8)) & 1;
-                    let color = if bit == 1 { self.fg } else { self.bg };
+                    let color = if bit == 1 { &self.fg } else { &self.bg };
                     self.blit(
                         x_off + x as u64 / FONT_SCALE,
                         y_off + y as u64 / FONT_SCALE,
-                        color,
+                        color.load(Ordering::Relaxed),
                     );
                 }
             }
         }
 
         if c == '\n' {
-            self.x = 0;
-            self.y += 1;
+            self.x.store(0, Ordering::Relaxed);
+            self.y.fetch_add(1, Ordering::Relaxed);
         } else {
-            self.x += 1;
+            self.x.fetch_add(1, Ordering::Relaxed);
         }
 
-        if self.x >= self.framebuffer.width as usize / FONT_WIDTH * FONT_SCALE as usize {
-            self.x = 0;
-            self.y += 1;
+        if self.x.load(Ordering::Relaxed)
+            >= self.framebuffer.width as usize / FONT_WIDTH * FONT_SCALE as usize
+        {
+            self.x.store(0, Ordering::Relaxed);
+            self.y.fetch_add(1, Ordering::Relaxed);
         }
 
-        if self.y >= self.framebuffer.height as usize / FONT_HEIGHT * FONT_SCALE as usize {
+        if self.y.load(Ordering::Relaxed)
+            >= self.framebuffer.height as usize / FONT_HEIGHT * FONT_SCALE as usize
+        {
             self.scroll();
-            self.y -= 1;
+            self.y.fetch_sub(1, Ordering::Relaxed);
         }
     }
 
-    pub fn scroll(&mut self) {
+    pub fn scroll(&self) {
         let fb_ptr = self.framebuffer.address.as_ptr().unwrap() as *mut u32;
         unsafe {
             core::ptr::copy(

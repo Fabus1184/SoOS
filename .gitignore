@@ -1,5 +1,5 @@
 iso_root/
-limine/
 target/
 SoOS.iso
-userspace/build
+userspace/build/*
+limine*

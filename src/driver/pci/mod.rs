@@ -236,19 +236,19 @@ impl HeaderType {
                 let secondary_latency_timer = pci_config_read_word(bus, device, function, 23) as u8;
                 let io_base = pci_config_read_word(bus, device, function, 24) as u8;
                 let io_limit = pci_config_read_word(bus, device, function, 25) as u8;
-                let secondary_status = pci_config_read_word(bus, device, function, 26) as u16;
-                let memory_base = pci_config_read_word(bus, device, function, 28) as u16;
-                let memory_limit = pci_config_read_word(bus, device, function, 30) as u16;
+                let secondary_status = pci_config_read_word(bus, device, function, 26);
+                let memory_base = pci_config_read_word(bus, device, function, 28);
+                let memory_limit = pci_config_read_word(bus, device, function, 30);
                 let prefetchable_memory_base =
-                    pci_config_read_word(bus, device, function, 32) as u16;
+                    pci_config_read_word(bus, device, function, 32);
                 let prefetchable_memory_limit =
-                    pci_config_read_word(bus, device, function, 34) as u16;
+                    pci_config_read_word(bus, device, function, 34);
                 let prefetchable_base_upper_32_bits =
                     pci_config_read_word(bus, device, function, 36) as u32;
                 let prefetchable_limit_upper_32_bits =
                     pci_config_read_word(bus, device, function, 40) as u32;
-                let io_base_upper_16_bits = pci_config_read_word(bus, device, function, 48) as u16;
-                let io_limit_upper_16_bits = pci_config_read_word(bus, device, function, 50) as u16;
+                let io_base_upper_16_bits = pci_config_read_word(bus, device, function, 48);
+                let io_limit_upper_16_bits = pci_config_read_word(bus, device, function, 50);
                 let capabilities_pointer = pci_config_read_word(bus, device, function, 52) as u8;
                 let reserved = [
                     pci_config_read_word(bus, device, function, 53) as u8,
@@ -259,7 +259,7 @@ impl HeaderType {
                     pci_config_read_word(bus, device, function, 56) as u32;
                 let interrupt_line = pci_config_read_word(bus, device, function, 60) as u8;
                 let interrupt_pin = pci_config_read_word(bus, device, function, 61) as u8;
-                let bridge_control = pci_config_read_word(bus, device, function, 62) as u16;
+                let bridge_control = pci_config_read_word(bus, device, function, 62);
 
                 Ok(Self::Bridge {
                     bar0,
@@ -296,7 +296,7 @@ impl HeaderType {
                     pci_config_read_word(bus, device, function, 54) as u8,
                     pci_config_read_word(bus, device, function, 55) as u8,
                 ];
-                let secondary_status = pci_config_read_word(bus, device, function, 56) as u16;
+                let secondary_status = pci_config_read_word(bus, device, function, 56);
                 let pci_bus_number = pci_config_read_word(bus, device, function, 58) as u8;
                 let cardbus_bus_number = pci_config_read_word(bus, device, function, 59) as u8;
                 let subordinate_bus_number = pci_config_read_word(bus, device, function, 60) as u8;
@@ -311,7 +311,7 @@ impl HeaderType {
                 let io_limit_1 = pci_config_read_word(bus, device, function, 92) as u32;
                 let interrupt_line = pci_config_read_word(bus, device, function, 96) as u8;
                 let interrupt_pin = pci_config_read_word(bus, device, function, 97) as u8;
-                let bridge_control = pci_config_read_word(bus, device, function, 98) as u16;
+                let bridge_control = pci_config_read_word(bus, device, function, 98);
                 let subsystem_device_id = pci_config_read_word(bus, device, function, 106);
                 let subsystem_vendor_id = pci_config_read_word(bus, device, function, 108);
                 let legacy_base_address = pci_config_read_word(bus, device, function, 112) as u32;

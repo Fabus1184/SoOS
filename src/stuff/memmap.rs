@@ -46,7 +46,9 @@ impl From<&MemmapResponse> for SoosMemmap {
             memmap[i] = Some(MemmapEntry {
                 base: entry.base,
                 len: entry.len,
-                type_: unsafe { core::mem::transmute(entry.typ) },
+                type_: unsafe {
+                    core::mem::transmute::<limine::MemoryMapEntryType, MemmapEntryType>(entry.typ)
+                },
             });
         }
 

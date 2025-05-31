@@ -1,19 +1,34 @@
 use core::arch::asm;
-use core::fmt::Write;
-
-use alloc::string::String;
 
 use crate::term::TERM;
 
-static mut BUF: [u8; 8192] = [0; 8192];
+use core::fmt::Write as _;
 
-struct Writer<'a>(&'a mut [u8], usize);
-impl Write for Writer<'_> {
+struct Cursor<'a> {
+    index: usize,
+    buffer: &'a mut [u8],
+}
+
+impl<'a> Cursor<'a> {
+    fn new(buffer: &'a mut [u8]) -> Self {
+        Cursor { index: 0, buffer }
+    }
+
+    fn finish(self) -> &'a mut [u8] {
+        &mut self.buffer[..self.index]
+    }
+}
+
+impl core::fmt::Write for Cursor<'_> {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        for b in s.bytes() {
-            self.0[self.1] = b;
-            self.1 += 1;
+        if self.index + s.len() > self.buffer.len() {
+            return Err(core::fmt::Error);
         }
+
+        self.buffer[self.index..self.index + s.len()].copy_from_slice(s.as_bytes());
+
+        self.index += s.len();
+
         Ok(())
     }
 }
@@ -22,17 +37,18 @@ impl Write for Writer<'_> {
 fn panic(info: &core::panic::PanicInfo) -> ! {
     unsafe { asm!("cli") }
 
-    unsafe {
-        TERM.fg = 0xFFF87060;
-        TERM.println("\nAllahkaputtputt!!");
-        TERM.print("Kernel Panic: ");
+    TERM.set_color(0xFFF87060, 0xFF000000);
+    TERM.println("\nAllahkaputtputt!!");
+    TERM.print("Kernel Panic: ");
 
-        let mut writer = Writer(BUF.as_mut(), 0);
-        write!(writer, "{}", info).expect("Failed to write panic info!");
-        let str = core::str::from_utf8(BUF[..writer.1].as_ref())
-            .expect("Failed to convert panic info to string!");
-        TERM.println(str);
-    };
+    let mut buffer = [0u8; 8192];
+    let mut writer = Cursor::new(&mut buffer);
+
+    write!(writer, "{}", info).expect("Failed to write panic info!");
+
+    let bytes = writer.finish();
+    let str = core::str::from_utf8(bytes).expect("Failed to convert panic info to string!");
+    TERM.println(str);
 
     unsafe {
         asm!("cli");

@@ -1,142 +1,176 @@
-use core::{arch::asm, sync::atomic::AtomicU32};
+use core::sync::atomic::AtomicU32;
 
-use alloc::{sync::Arc, vec::Vec};
-use log::{debug, trace};
-use spin::{Lazy, Mutex};
+use alloc::vec::Vec;
 
-use crate::{
-    driver::i8253::{SystemTime, TIMER0},
-    idt::GPRegisters,
-    kernel::paging::SoosPaging,
-};
+use crate::kernel::paging::SoosPaging;
+
+pub enum State {
+    Ready,
+    Sleeping(u64),
+}
+
+enum Paging {
+    Paging(SoosPaging<'static>),
+    KernelPaging,
+}
+
+impl Paging {
+    pub fn load(&mut self) {
+        unsafe {
+            match self {
+                Paging::Paging(paging) => paging.load(),
+                Paging::KernelPaging => (*crate::KERNEL_PAGING).load(),
+            }
+        }
+    }
+}
 
 pub struct Process {
-    pub pid: u32,
-    pub descriptors: Vec<Vec<u8>>,
-    pub sleep: Option<SystemTime>,
-    pub state: ProcessState,
-    pub paging: Option<SoosPaging<'static>>,
+    pid: u32,
+    state: State,
+    paging: Paging,
+    cs: x86_64::structures::gdt::SegmentSelector,
+    ds: x86_64::structures::gdt::SegmentSelector,
+    flags: u64,
+    rip: u64,
+    registers: crate::idt::GPRegisters,
 }
 
-#[derive(Debug, Default, Clone)]
-#[repr(C)]
-pub struct ProcessState {
-    pub gp: GPRegisters,
-    pub rip: u64,
-    pub flags: u64,
-    pub ds: u64,
-    pub cs: u64,
-}
-
-pub static mut PROCESSES: Lazy<Arc<Mutex<Vec<Process>>>> =
-    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
+pub static PROCESSES: spin::Lazy<spin::Mutex<Vec<Process>>> =
+    spin::Lazy::new(|| spin::Mutex::new(Vec::new()));
 pub static CURRENT_PROCESS: AtomicU32 = AtomicU32::new(0);
 
-pub unsafe fn schedule() -> ! {
-    let mut run = None;
-
-    let mut processes = PROCESSES.lock();
-    for process in processes.iter_mut() {
-        if process.ready() {
-            run = Some((process.run(), process.pid));
-            break;
-        }
-    }
-    drop(processes);
-
-    match run {
-        Some((run, pid)) => {
-            debug!("running process {pid}");
-            run()
-        }
-        None => {
-            debug!("no process to run, hlt");
-            Process::new(
-                0,
-                None,
-                hlt as usize as u64,
-                HLT_STACK.as_ptr() as u64 + 4096,
-                0x10,
-                0x8,
-                0x202,
-            )
-            .run()()
-        }
-    }
-}
-
-static mut HLT_STACK: [u8; 4096] = [0; 4096];
-
-unsafe fn hlt() -> ! {
-    loop {
-        debug!("hlt");
-        asm!("hlt");
-    }
-}
-
-extern "C" {
-    fn run_process(cs: u64, ds: u64, flags: u64, rip: u64, regs: *const GPRegisters) -> !;
-}
-
 impl Process {
-    pub fn new(
+    pub fn user_process(
         pid: u32,
-        paging: Option<SoosPaging<'static>>,
+        paging: SoosPaging<'static>,
+        cs: x86_64::structures::gdt::SegmentSelector,
+        ds: x86_64::structures::gdt::SegmentSelector,
+        flags: u64,
         rip: u64,
         rsp: u64,
-        ds: u64,
-        cs: u64,
-        flags: u64,
     ) -> Self {
-        Self {
+        Process {
             pid,
-            paging,
-            descriptors: Vec::new(),
-            sleep: None,
-            state: ProcessState {
-                gp: GPRegisters {
-                    rsp,
-                    ..Default::default()
-                },
-                rip,
-                flags,
-                ds,
-                cs,
+            state: State::Ready,
+            paging: Paging::Paging(paging),
+            cs,
+            ds,
+            flags,
+            rip,
+            registers: crate::idt::GPRegisters {
+                rsp,
+                ..Default::default()
             },
         }
     }
 
-    pub fn ready(&mut self) -> bool {
-        trace!("checking if process {} is ready", self.pid);
-        match self.sleep {
-            Some(end) => unsafe { TIMER0.time() >= end },
-            None => true,
+    pub fn kernel_process(
+        pid: u32,
+        cs: x86_64::structures::gdt::SegmentSelector,
+        ds: x86_64::structures::gdt::SegmentSelector,
+        flags: u64,
+        rip: u64,
+        rsp: u64,
+    ) -> Self {
+        Process {
+            pid,
+            state: State::Ready,
+            paging: Paging::KernelPaging,
+            cs,
+            ds,
+            flags,
+            rip,
+            registers: crate::idt::GPRegisters {
+                rsp,
+                ..Default::default()
+            },
         }
     }
 
-    /// Returns a closure that will run the process
-    /// Make sure to only call this while the process still exists
-    pub unsafe fn run(&mut self) -> impl FnOnce() -> ! {
-        let pid = self.pid;
-        let state = self.state.clone();
-        let load_paging = self.paging.as_mut().map(|p| p.load_fn());
-
-        move || {
-            asm!("cli");
-
-            CURRENT_PROCESS.store(pid, core::sync::atomic::Ordering::Relaxed);
-
-            if let Some(load) = load_paging {
-                load();
+    fn ready(&self) -> bool {
+        match self.state {
+            State::Ready => true,
+            State::Sleeping(target) => {
+                let ticks = unsafe { crate::i8253::TIMER0.ticks() };
+                ticks >= target
             }
-
-            run_process(
-                state.cs,
-                state.ds,
-                state.flags,
-                state.rip,
-                &state.gp as *const GPRegisters,
-            )
         }
+    }
+}
+
+pub fn set_current_process_state(state: State) {
+    let pid = CURRENT_PROCESS.load(core::sync::atomic::Ordering::Relaxed);
+
+    let mut processes = PROCESSES.try_lock().expect("Failed to lock processes");
+    let process = processes
+        .iter_mut()
+        .find(|p| p.pid == pid)
+        .expect("Process not found");
+
+    process.state = state;
+}
+
+pub fn terminate_current_process() {
+    let pid = CURRENT_PROCESS.load(core::sync::atomic::Ordering::Relaxed);
+
+    let mut processes = PROCESSES.try_lock().expect("Failed to lock processes");
+    if let Some(index) = processes.iter().position(|p| p.pid == pid) {
+        processes.remove(index);
+    } else {
+        panic!("Process not found for termination");
+    }
+
+    if processes.is_empty() {
+        panic!("No more processes left to run!");
+    }
+
+    CURRENT_PROCESS.store(0, core::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn store_current_process_registers(
+    stack_frame: x86_64::structures::idt::InterruptStackFrame,
+    registers: crate::idt::GPRegisters,
+) {
+    let pid = CURRENT_PROCESS.load(core::sync::atomic::Ordering::Relaxed);
+
+    let mut processes = PROCESSES.try_lock().expect("Failed to lock processes");
+    let process = processes
+        .iter_mut()
+        .find(|p| p.pid == pid)
+        .expect("Process not found");
+
+    process.flags = stack_frame.cpu_flags;
+    process.rip = stack_frame.instruction_pointer.as_u64();
+    process.registers = crate::idt::GPRegisters {
+        rsp: stack_frame.stack_pointer.as_u64(),
+        ..registers
+    };
+}
+
+pub fn try_schedule() -> Option<!> {
+    match PROCESSES.try_lock() {
+        Some(mut processes) => {
+            let process = match processes.iter_mut().find(|p| p.ready()) {
+                None => panic!("No process ready to run!"),
+                Some(process) => process,
+            };
+
+            CURRENT_PROCESS.store(process.pid, core::sync::atomic::Ordering::Relaxed);
+
+            process.paging.load();
+
+            let cs = process.cs.0 as u64;
+            let ds = process.ds.0 as u64;
+            let flags = process.flags;
+            let rip = process.rip;
+            let registers = process.registers;
+            drop(processes);
+
+            unsafe {
+                crate::do_iret(cs, ds, flags, rip, &registers);
+            };
+        }
+        None => None,
     }
 }

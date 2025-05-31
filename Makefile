@@ -1,21 +1,27 @@
+LIMINE=limine-9.3.3
+LIMINE_BIN=limine-9.3.3/bin/limine
+LIMINE_FILES = $(patsubst %, $(LIMINE)/bin/%, limine-bios.sys limine-bios-cd.bin limine-uefi-cd.bin)
+
 clean:
 	rm SoOS.iso || true
-	rm userspace/build/* || true
 
-run: userspace/build/test
-	cargo build -vv
+run: $(LIMINE_FILES) $(LIMINE_BIN)
+	make -C userspace
+
+	@echo "Limine files: $(LIMINE_FILES)"
+
+	cargo build
 	
 	rm -rf iso_root || true
 	rm -f SoOS.iso || true
 
-	make -C limine
 	mkdir -p iso_root
 
 	cp -v target/x86_64-unknown-none/debug/soos iso_root/kernel.elf
-	cp -v limine.cfg limine/limine-bios.sys limine/limine-bios-cd.bin limine/limine-uefi-cd.bin iso_root/
+	cp -v limine.conf $(LIMINE_FILES) iso_root/
 
 	mkdir -p iso_root/EFI/BOOT
-	cp -v limine/BOOT*.EFI iso_root/EFI/BOOT/
+	cp -v $(LIMINE)/bin/BOOT*.EFI iso_root/EFI/BOOT/
 
 	xorriso -as mkisofs -b limine-bios-cd.bin \
 		-no-emul-boot -boot-load-size 4 -boot-info-table \
@@ -23,13 +29,9 @@ run: userspace/build/test
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
 		iso_root -o SoOS.iso
 
-	./limine/limine bios-install SoOS.iso
+	$(LIMINE_BIN) bios-install SoOS.iso
 
-	qemu-system-x86_64 -cpu qemu64,+la57 -cdrom SoOS.iso -d guest_errors -m 8G -d cpu_reset -M smm=off -s
+	qemu-system-x86_64 -cpu qemu64,+la57 -cdrom SoOS.iso -d guest_errors -m 8G -d cpu_reset -M smm=off -s -no-reboot
 
-limine:
-	git clone https://github.com/limine-bootloader/limine.git --branch=v5.x-branch-binary --depth=1
-	make -C limine
-
-userspace/build/%: userspace/src/%.c
-	gcc -ffreestanding -nostdlib -nodefaultlibs -nostartfiles -fno-stack-protector -o $@ $<
+$(LIMINE_FILES) $(LIMINE_BIN): $(LIMINE)
+	cd $(LIMINE) && ./configure --enable-bios --enable-bios-cd --enable-uefi-x86-64 --enable-uefi-cd && make -j$(nproc)

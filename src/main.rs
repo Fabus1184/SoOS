@@ -18,7 +18,6 @@ mod term;
 
 use core::arch::asm;
 
-use aligned::{Aligned, A16, A32, A8};
 use alloc::{borrow::ToOwned, format};
 use include_bytes_aligned::include_bytes_aligned;
 use log::{info, LevelFilter};
@@ -28,7 +27,7 @@ use x86_64::{
     registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
     structures::{
         gdt::{Descriptor, GlobalDescriptorTable},
-        paging::{mapper::CleanUp, page::PageRangeInclusive, FrameAllocator, Page, PageTable},
+        paging::{FrameAllocator, PageTable},
         tss::TaskStateSegment,
     },
     VirtAddr,
@@ -40,14 +39,11 @@ use crate::{
         logger::KernelLogger,
         paging::{self, SoosFrameAllocator, SoosPaging},
     },
-    process::{Process, PROCESSES},
-    stuff::memmap::{MemmapEntryType, SoosMemmap},
+    stuff::memmap::SoosMemmap,
     term::TERM,
 };
 
 static MEMMAP_REQUEST: limine::MemmapRequest = limine::MemmapRequest::new(0);
-
-static BOOT_INFO_REQUEST: limine::BootInfoRequest = limine::BootInfoRequest::new(0);
 
 static PAGING_MODE_REQUEST: limine::PagingModeRequest =
     limine::PagingModeRequest::new(0).mode(limine::PagingMode::Lvl4);
@@ -65,13 +61,12 @@ const BANNER: &[&str] = &[
     r#""#,
 ];
 
-const KERNEL_STACK_SIZE: usize = 4192 * 100;
-pub static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
-
 static mut KERNEL_PAGING: *mut SoosPaging = core::ptr::null_mut();
 
 #[no_mangle]
 unsafe extern "C" fn _start() -> ! {
+    static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
+    const KERNEL_STACK_SIZE: usize = 4192 * 100;
     let kernel_stack_pointer = KERNEL_STACK.as_mut_ptr() as u64 + KERNEL_STACK.len() as u64;
 
     static mut TSS: TaskStateSegment = TaskStateSegment::new();
@@ -102,7 +97,7 @@ unsafe extern "C" fn _start() -> ! {
 
     tables::load_tss(tss);
 
-    TERM.fg = 0xFF00FF00;
+    TERM.set_color(0xFF00FF00, 0xFF000000);
 
     let paging = PAGING_MODE_REQUEST
         .get_response()
@@ -170,7 +165,8 @@ unsafe extern "C" fn _start() -> ! {
 
     let rip = x86_64::registers::read_rip();
     info!("RIP: {:#x}", rip);
-    let mut rsp: u64;
+
+    let rsp: u64;
     asm!("mov {}, rsp", out(reg) rsp);
     info!("RSP: {:#x}", rsp);
 
@@ -210,25 +206,55 @@ unsafe extern "C" fn _start() -> ! {
         &mut process_paging,
         &mut *KERNEL_PAGING,
         frame_allocator,
-        include_bytes_aligned!(32, "../userspace/build/test"),
+        include_bytes_aligned!(32, "../userspace/build/fib"),
         VirtAddr::new(0x0000_1234_0000_0000),
     );
 
-    info!("ELF loaded at {:?}", userspace_address);
+    info!(
+        "ELF loaded at {:?}, stack at {:?}",
+        userspace_address, userspace_stack
+    );
 
     {
-        let mut processes = PROCESSES.lock();
-
-        processes.push(Process::new(
-            1234,
-            Some(process_paging),
-            userspace_address.as_u64(),
-            userspace_stack.as_u64(),
-            uds.0 as u64,
-            ucs.0 as u64,
-            0x202,
-        ));
+        process::PROCESSES
+            .lock()
+            .push(process::Process::user_process(
+                123,
+                process_paging,
+                ucs,
+                uds,
+                0x202,
+                userspace_address.as_u64(),
+                userspace_stack.as_u64(),
+            ));
     }
 
-    process::schedule()
+    {
+        process::PROCESSES
+            .lock()
+            .push(process::Process::kernel_process(
+                0,
+                CS::get_reg(),
+                DS::get_reg(),
+                0x202,
+                kernel_process as usize as u64,
+                kernel_stack_pointer,
+            ));
+    }
+
+    process::try_schedule().unwrap_or_else(|| {
+        panic!("No process ready to run!");
+    });
+}
+
+fn kernel_process() {
+    log::trace!("Kernel process running...");
+    for _ in 0..100_000 {
+        core::hint::spin_loop();
+    }
+    process::try_schedule().expect("Failed to schedule a process!");
+}
+
+extern "C" {
+    pub fn do_iret(cs: u64, ds: u64, flags: u64, rip: u64, regs: *const idt::GPRegisters) -> !;
 }

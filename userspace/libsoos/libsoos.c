@@ -1,19 +1,54 @@
 #include <stdarg.h>
 #include <stdint.h>
 
+void itoa(int32_t value, char *str) {
+    int32_t i = 0;
+    int32_t is_negative = 0;
+
+    if (value < 0) {
+        is_negative = 1;
+        value = -value;
+    }
+
+    do {
+        str[i++] = value % 10 + '0';
+        value /= 10;
+    } while (value > 0);
+
+    if (is_negative) {
+        str[i++] = '-';
+    }
+
+    str[i] = '\0';
+
+    for (int32_t j = 0; j < i / 2; j++) {
+        char tmp = str[j];
+        str[j] = str[i - j - 1];
+        str[i - j - 1] = tmp;
+    }
+}
+
+uint64_t strlen(const char *str) {
+    int32_t len = 0;
+    while (str[len] != '\0') {
+        len++;
+    }
+    return len;
+}
+
 enum SYSCALL {
     SYSCALL_PRINT = 0,
     SYSCALL_SLEEP = 1,
     SYSCALL_EXIT = 2,
 };
 
-int syscall(enum SYSCALL _syscall, ...) {
+int32_t syscall(enum SYSCALL _syscall, ...) {
     va_list args;
     va_start(args, _syscall);
 
     uint64_t syscall = (uint64_t)_syscall;
 
-    int ret = -1;
+    int32_t ret = -1;
     switch (syscall) {
     case SYSCALL_PRINT: {
         char *str = va_arg(args, char *);
@@ -62,63 +97,6 @@ int syscall(enum SYSCALL _syscall, ...) {
     return ret;
 }
 
-void itoa(int value, char *str) {
-    int i = 0;
-    int is_negative = 0;
-
-    if (value < 0) {
-        is_negative = 1;
-        value = -value;
-    }
-
-    do {
-        str[i++] = value % 10 + '0';
-        value /= 10;
-    } while (value > 0);
-
-    if (is_negative) {
-        str[i++] = '-';
-    }
-
-    str[i] = '\0';
-
-    for (int j = 0; j < i / 2; j++) {
-        char tmp = str[j];
-        str[j] = str[i - j - 1];
-        str[i - j - 1] = tmp;
-    }
-}
-
-uint64_t strlen(const char *str) {
-    int len = 0;
-    while (str[len] != '\0') {
-        len++;
-    }
-    return len;
-}
-
 void print(const char *str) { syscall(SYSCALL_PRINT, str, strlen(str)); }
 void sleep(uint64_t ms) { syscall(SYSCALL_SLEEP, ms); }
 void exit(uint64_t status) { syscall(SYSCALL_EXIT, status); }
-
-void _start() {
-    print("Hello from userspace!\n");
-
-    int a = 0, b = 1;
-    for (int i = 0; i < 20; i++) {
-        char str[32];
-        itoa(a, str);
-        print(str);
-        print("\n");
-
-        int tmp = a;
-        a = b;
-        b = tmp + b;
-
-        sleep(500);
-    }
-
-    print("Goodbye from userspace!\n");
-
-    exit(69420);
-}

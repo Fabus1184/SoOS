@@ -1,7 +1,5 @@
-use core::time::Duration;
-
 use alloc::vec;
-use log::{debug, error, info, trace};
+use log::{debug, error, trace};
 use x86_64::{
     structures::{
         idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
@@ -11,10 +9,8 @@ use x86_64::{
 };
 
 use crate::{
-    driver::{self, i8253::TIMER0},
-    process::{self, ProcessState, CURRENT_PROCESS, PROCESSES},
+    driver::{self},
     term::TERM,
-    KERNEL_PAGING,
 };
 
 pub static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
@@ -119,25 +115,6 @@ pub struct GPRegisters {
     pub r15: u64,
 }
 
-unsafe fn store_process_state(registers: GPRegisters, stack_frame: InterruptStackFrame) {
-    {
-        let mut processes = PROCESSES.lock();
-        let current_pid = CURRENT_PROCESS.load(core::sync::atomic::Ordering::Relaxed);
-        if let Some(current) = processes.iter_mut().find(|p| p.pid == current_pid) {
-            current.state = ProcessState {
-                gp: GPRegisters {
-                    rsp: stack_frame.stack_pointer.as_u64(),
-                    ..registers
-                },
-                rip: stack_frame.instruction_pointer.as_u64(),
-                flags: stack_frame.cpu_flags,
-                ds: stack_frame.stack_segment,
-                cs: stack_frame.code_segment,
-            };
-        }
-    }
-}
-
 #[no_mangle]
 pub unsafe extern "C" fn syscall_handler(
     _rdi: u64,
@@ -149,11 +126,6 @@ pub unsafe extern "C" fn syscall_handler(
     registers: GPRegisters,
     stack_frame: InterruptStackFrame,
 ) {
-    unsafe {
-        (*KERNEL_PAGING).load();
-        store_process_state(registers, stack_frame);
-    };
-
     match registers.rax {
         0 => {
             trace!(
@@ -164,72 +136,39 @@ pub unsafe extern "C" fn syscall_handler(
 
             // print
             let mut bytes = vec![0; registers.rcx as usize];
-
-            {
-                let mut processes = PROCESSES.lock();
-                let pid = CURRENT_PROCESS.load(core::sync::atomic::Ordering::Relaxed);
-                let current_process = processes
-                    .iter_mut()
-                    .find(|p| p.pid == pid)
-                    .expect("failed to find current process");
-                if let Some(paging) = current_process.paging.as_mut() {
-                    paging.load();
-                }
-
-                debug!(
-                    "Copying from {:#x} to {:#x}",
-                    registers.rbx,
-                    registers.rbx + registers.rcx
-                );
-
-                for i in 0..registers.rcx {
-                    bytes[i as usize] = core::ptr::read((registers.rbx + i) as *const u8);
-                }
-
-                (*KERNEL_PAGING).load();
+            for (i, byte) in bytes.iter_mut().enumerate() {
+                *byte = (registers.rbx as *const u8).add(i).read();
             }
 
-            debug!("Printing: {:?}", bytes);
+            let str = core::str::from_utf8(&bytes).expect("Invalid UTF-8 string");
+            TERM.print(str);
 
-            let str = core::str::from_utf8(&bytes).unwrap();
-            unsafe { TERM.print(str) };
+            crate::process::store_current_process_registers(stack_frame, registers);
         }
         1 => {
-            // sleep for rax ms
+            // sleep for rbx ms
             trace!("syscall_handler: sleep {:#x}", registers.rbx);
+            crate::process::set_current_process_state(crate::process::State::Sleeping(unsafe {
+                crate::i8253::TIMER0.ticks() + registers.rbx / 100
+            }));
 
-            let mut processes = PROCESSES.lock();
-            if let Some(process) = processes
-                .iter_mut()
-                .find(|p| p.pid == CURRENT_PROCESS.load(core::sync::atomic::Ordering::Relaxed))
-            {
-                process.sleep = Some(TIMER0.time() + Duration::from_millis(registers.rbx));
-            }
+            crate::process::store_current_process_registers(stack_frame, registers);
         }
         2 => {
             // exit
             trace!("syscall_handler: exit {:#x}", registers.rbx);
-
-            let mut processes = PROCESSES.lock();
-            let current_pid = CURRENT_PROCESS.load(core::sync::atomic::Ordering::Relaxed);
-            if let Some(index) = processes.iter().position(|p| p.pid == current_pid) {
-                processes.remove(index);
-            }
-
-            info!("process {} exited with code {}", current_pid, registers.rbx);
-
-            process::schedule();
+            crate::process::terminate_current_process();
         }
         n => {
-            error!("syscall_handler: unknown syscall: {:#x}", n);
+            panic!("syscall_handler: unknown syscall: {:#x}", n);
         }
     }
 
-    process::schedule();
+    crate::process::try_schedule().expect("Failed to schedule a process");
 }
 
 #[no_mangle]
-pub extern "C" fn irq_handler(
+extern "C" fn irq_handler(
     _rdi: u64,
     _rsi: u64,
     _rdx: u64,
@@ -240,12 +179,12 @@ pub extern "C" fn irq_handler(
     irq: u8,
     stack_frame: InterruptStackFrame,
 ) {
-    trace!("irq_handler: irq {:?}, stack_frame {:?}", irq, stack_frame);
-
-    unsafe {
-        (*KERNEL_PAGING).load();
-        store_process_state(registers, stack_frame);
-    };
+    trace!(
+        "irq_handler begin: irq {:0x?}, stack_frame {:0x?}, registers {:0x?}",
+        irq,
+        stack_frame,
+        registers
+    );
 
     match irq {
         0 => unsafe {
@@ -263,7 +202,20 @@ pub extern "C" fn irq_handler(
 
     crate::pic::eoi(irq);
 
-    unsafe { process::schedule() };
+    trace!("irq_handler end");
+
+    unsafe {
+        crate::do_iret(
+            stack_frame.code_segment,
+            stack_frame.stack_segment,
+            stack_frame.cpu_flags,
+            stack_frame.instruction_pointer.as_u64(),
+            &GPRegisters {
+                rsp: stack_frame.stack_pointer.as_u64(),
+                ..registers
+            },
+        )
+    };
 }
 
 extern "x86-interrupt" fn alignment_check_handler(stack_frame: InterruptStackFrame, err: u64) {
@@ -337,32 +289,10 @@ extern "x86-interrupt" fn page_fault_handler(
     stack_frame: InterruptStackFrame,
     err: PageFaultErrorCode,
 ) {
-    let mut processes = unsafe { PROCESSES.lock() };
-    let current_pid = CURRENT_PROCESS.load(core::sync::atomic::Ordering::Relaxed);
-    if let Some(i) = processes.iter().position(|p| p.pid == current_pid) {
-        unsafe {
-            (*KERNEL_PAGING).load();
-        }
-
-        info!(
-            "Page fault in process {}: {:#x?}, aborting",
-            current_pid, stack_frame
-        );
-
-        processes.remove(i);
-        CURRENT_PROCESS.store(0, core::sync::atomic::Ordering::Relaxed);
-
-        drop(processes);
-
-        loop {}
-
-        unsafe { process::schedule() };
-    } else {
-        panic!(
-            "EXCEPTION: KERNEL PAGE FAULT {:#x?}\n Error code: {:?}",
-            stack_frame, err
-        );
-    }
+    panic!(
+        "EXCEPTION: KERNEL PAGE FAULT {:#x?}\n Error code: {:?}",
+        stack_frame, err
+    );
 }
 
 extern "x86-interrupt" fn security_exception_handler(stack_frame: InterruptStackFrame, err: u64) {

@@ -91,7 +91,7 @@ unsafe impl FrameAllocator<Size4KiB> for SoosFrameAllocator {
             .map(|a| PhysFrame::containing_address(PhysAddr::new(a)))
             .filter(|&f| {
                 let i = f.start_address().as_u64() as usize / 4096;
-                unsafe { FRAME_ALLOCATION_BITMAP[i] == false }
+                unsafe { !FRAME_ALLOCATION_BITMAP[i] }
             })
             .next();
 
