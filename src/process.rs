@@ -1,6 +1,6 @@
 use core::sync::atomic::AtomicU32;
 
-use alloc::{borrow::ToOwned as _, vec::Vec};
+use alloc::{borrow::ToOwned as _, collections::vec_deque::VecDeque, vec::Vec};
 use x86_64::structures::paging::{FrameAllocator as _, Mapper};
 
 use crate::kernel::paging::SoosPaging;
@@ -45,10 +45,34 @@ pub struct Process {
         x86_64::structures::paging::Page,
         x86_64::structures::paging::PageTableFlags,
     )>,
+    file_descriptors: alloc::collections::BTreeMap<FileDescriptor, ProcessFileDescriptor>,
 }
 
-pub static PROCESSES: spin::Lazy<spin::Mutex<Vec<Process>>> =
-    spin::Lazy::new(|| spin::Mutex::new(Vec::new()));
+#[derive(Debug, Clone)]
+pub struct ProcessFileDescriptor {
+    pub path: alloc::string::String,
+    pub offset: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd)]
+pub struct FileDescriptor(u64);
+
+impl FileDescriptor {
+    const fn from_index(fd: usize) -> Self {
+        FileDescriptor(fd as u64 + 3) // 0, 1, 2 are reserved for stdin, stdout, stderr
+    }
+
+    pub const fn from_u64(fd: u64) -> Self {
+        FileDescriptor(fd)
+    }
+
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
+pub static PROCESSES: spin::Lazy<spin::Mutex<VecDeque<Process>>> =
+    spin::Lazy::new(|| spin::Mutex::new(VecDeque::new()));
 pub static CURRENT_PROCESS: AtomicU32 = AtomicU32::new(0);
 
 impl Process {
@@ -111,6 +135,7 @@ impl Process {
             },
             stdin: alloc::collections::VecDeque::new(),
             mapped_pages,
+            file_descriptors: alloc::collections::BTreeMap::new(),
         }
     }
 
@@ -154,7 +179,26 @@ impl Process {
             registers: self.registers,
             stdin: self.stdin.clone(),
             mapped_pages: self.mapped_pages.clone(),
+            file_descriptors: self.file_descriptors.clone(),
         }
+    }
+
+    pub fn new_file_descriptor(&mut self, fd: ProcessFileDescriptor) -> FileDescriptor {
+        let index = self.file_descriptors.len();
+        let file_descriptor = FileDescriptor::from_index(index);
+        self.file_descriptors.insert(file_descriptor, fd);
+        file_descriptor
+    }
+
+    pub fn close_file_descriptor(&mut self, fd: FileDescriptor) -> Option<ProcessFileDescriptor> {
+        self.file_descriptors.remove(&fd)
+    }
+
+    pub fn file_descriptor_mut(
+        &mut self,
+        fd: FileDescriptor,
+    ) -> Option<&mut ProcessFileDescriptor> {
+        self.file_descriptors.get_mut(&fd)
     }
 }
 
@@ -172,7 +216,7 @@ impl Drop for Process {
 }
 
 pub struct IndexedProcessGuard<'a> {
-    processes: spin::MutexGuard<'a, Vec<Process>>,
+    processes: spin::MutexGuard<'a, VecDeque<Process>>,
     index: usize,
 }
 
@@ -181,8 +225,8 @@ impl IndexedProcessGuard<'_> {
         &mut self.processes[self.index]
     }
 
-    pub fn get_processes(&mut self) -> &mut Vec<Process> {
-        self.processes.as_mut()
+    pub fn get_processes(&mut self) -> &mut VecDeque<Process> {
+        &mut self.processes
     }
 }
 
@@ -222,35 +266,38 @@ pub fn try_schedule() -> Option<!> {
 
                 let mut processes = lock.processes;
 
-                let process = match processes
-                    .iter_mut()
-                    .find(|p| matches!(p.state, State::Ready))
-                {
-                    None => {
+                // rotate through processes until we find one that is ready
+                for _ in 0..processes.len() {
+                    let process = processes.front_mut().expect("No processes left!");
+
+                    if process.state == State::Ready {
+                        log::trace!("Scheduling {}", process.pid);
+
+                        CURRENT_PROCESS.store(process.pid, core::sync::atomic::Ordering::Relaxed);
+
+                        process.load_paging();
+
+                        let cs = process.cs.0 as u64;
+                        let ds = process.ds.0 as u64;
+                        let flags = process.flags;
+                        let rip = process.rip;
+                        let registers = process.registers;
+
+                        processes.rotate_left(1);
                         drop(processes);
-                        x86_64::instructions::interrupts::enable_and_hlt();
-                        x86_64::instructions::interrupts::disable();
-                        continue;
+
+                        unsafe {
+                            crate::do_iret(cs, ds, flags, rip, &registers);
+                        };
+                    } else {
+                        processes.rotate_left(1);
                     }
-                    Some(process) => process,
-                };
+                }
 
-                log::trace!("Scheduling {}", process.pid);
-
-                CURRENT_PROCESS.store(process.pid, core::sync::atomic::Ordering::Relaxed);
-
-                process.load_paging();
-
-                let cs = process.cs.0 as u64;
-                let ds = process.ds.0 as u64;
-                let flags = process.flags;
-                let rip = process.rip;
-                let registers = process.registers;
                 drop(processes);
-
-                unsafe {
-                    crate::do_iret(cs, ds, flags, rip, &registers);
-                };
+                x86_64::instructions::interrupts::enable_and_hlt();
+                x86_64::instructions::interrupts::disable();
+                continue;
             }
             None => return None,
         }

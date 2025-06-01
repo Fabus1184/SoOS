@@ -60,6 +60,9 @@ enum SYSCALL {
     SYSCALL_LISTDIR = 3,
     SYSCALL_READ = 4,
     SYSCALL_FORK = 5,
+    SYSCALL_OPEN = 6,
+    SYSCALL_CLOSE = 7,
+    SYSCALL_MAX,
 };
 
 void print(const char *str) {
@@ -141,6 +144,40 @@ uint32_t fork(void) {
                  : "=rax"(ret)
                  : [syscall] "i"(SYSCALL_FORK)
                  :);
+
+    return ret;
+}
+
+int64_t open(const char *path) {
+    uint64_t len = strlen(path);
+    int64_t ret;
+
+    // open file (path pointer in rbx, path length in rcx)
+    // return file descriptor in rax
+
+    asm volatile("mov %[syscall], %%rax\n"
+                 "mov %[path], %%rbx\n"
+                 "mov %[len], %%rcx\n"
+                 "int $0x80\n"
+                 : "=rax"(ret)
+                 : [syscall] "i"(SYSCALL_OPEN), [path] "m"(path), [len] "m"(len)
+                 : "rbx", "rcx");
+
+    return ret;
+}
+
+int64_t close(uint64_t fd) {
+    int64_t ret;
+
+    // close file descriptor (fd in rbx)
+    // return 0 on success, -1 on error in rax
+
+    asm volatile("mov %[syscall], %%rax\n"
+                 "mov %[fd], %%rbx\n"
+                 "int $0x80\n"
+                 : "=rax"(ret)
+                 : [syscall] "i"(SYSCALL_CLOSE), [fd] "m"(fd)
+                 : "rbx");
 
     return ret;
 }

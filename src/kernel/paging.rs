@@ -159,12 +159,15 @@ pub struct SoosFrameAllocator {
 }
 
 impl SoosFrameAllocator {
-    pub fn init_with_current_pagetable(memmap: SoosMemmap) -> &'static mut Self {
+    pub fn init_with_current_pagetable(
+        memmap: SoosMemmap,
+        reserve_contiguous_frames: usize,
+    ) -> u64 {
         static mut BITMAP: [bool; MAX_USABLE_FRAMES] = [false; MAX_USABLE_FRAMES];
 
         unsafe {
             SOOS_FRAME_ALLOCATOR.get_or_insert_with(|| {
-                let mut self_ = Self {
+                let self_ = Self {
                     memmap,
                     skip: 0,
                     bitmap: &mut BITMAP,
@@ -184,7 +187,23 @@ impl SoosFrameAllocator {
 
                 self_
             })
+        };
+
+        let reserved_address = 0x7777_0000;
+
+        // reserve contiguous frames not to be allocated
+        for i in 0..reserve_contiguous_frames {
+            let frame = PhysFrame::<Size4KiB>::containing_address(PhysAddr::new(
+                reserved_address + i as u64 * 4096,
+            ));
+            let index = frame.start_address().as_u64() as usize / 4096;
+            unsafe {
+                SOOS_FRAME_ALLOCATOR.as_mut().unwrap().bitmap[index] = true;
+            }
         }
+
+        // return the address of the reserved frames
+        reserved_address
     }
 }
 

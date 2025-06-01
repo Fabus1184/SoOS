@@ -13,12 +13,14 @@ chrono = { version = "0.4.31", default-features = false }
 elf_rs = "0.3.0"
 heapless = "0.8.0"
 include_bytes_aligned = "0.1.3"
+itertools = { version = "0.14.0", default-features = false }
 limine = "0.4.0"
 linked_list_allocator = "0.10.5"
 log = "0.4.19"
 pc-keyboard = "0.8.0"
 raw-cpuid = "11.0.1"
 spin = "0.10.0"
+thiserror = { version = "2.0.12", default-features = false }
 vte = { version = "0.15.0", default-features = false, features = ["ansi"] }
 x86_64 = { version = "0.15.2", default-features = false, features = [
     "abi_x86_interrupt",

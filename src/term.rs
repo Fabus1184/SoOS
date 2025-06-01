@@ -100,21 +100,19 @@ impl Performer<'_> {
 
         if c == '\0' {
             return;
-        }
-
-        if c == '\x08' {
-            if self.x > 0 {
-                self.blit(
-                    (self.x * FONT_WIDTH) as u64 / font_scale,
-                    (self.y * FONT_HEIGHT) as u64 / font_scale,
-                    self.bg,
-                );
-                self.x = self.x.saturating_sub(1);
+        } else if c == ' ' {
+            let x_off = (self.x * FONT_WIDTH) as u64 / font_scale;
+            let y_off = (self.y * FONT_HEIGHT) as u64 / font_scale;
+            for x in 0..FONT_WIDTH {
+                for y in 0..FONT_HEIGHT {
+                    self.blit(
+                        x_off + x as u64 / font_scale,
+                        y_off + y as u64 / font_scale,
+                        self.bg,
+                    );
+                }
             }
-            return;
-        }
-
-        if c.is_ascii_graphic() {
+        } else if c.is_ascii_graphic() {
             let x_off = (self.x * FONT_WIDTH) as u64 / font_scale;
             let y_off = (self.y * FONT_HEIGHT) as u64 / font_scale;
 
@@ -165,14 +163,20 @@ impl vte::Perform for Performer<'_> {
 
     fn execute(&mut self, byte: u8) {
         match byte {
+            // new line
             b'\n' => {
                 self.x = 0;
                 self.y += 1;
             }
+            // carriage return
             b'\r' => {
                 self.x = 0;
             }
-            _ => {}
+            // backspace
+            b'\x08' => {
+                self.x = self.x.saturating_sub(1);
+            }
+            c => panic!("Unhandled control character: {}", c),
         }
     }
 

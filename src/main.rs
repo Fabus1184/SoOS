@@ -10,6 +10,7 @@ mod driver;
 mod elf;
 mod font;
 mod idt;
+mod io;
 mod kernel;
 mod pic;
 mod process;
@@ -28,7 +29,7 @@ use x86_64::{
     registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
     structures::{
         gdt::{Descriptor, GlobalDescriptorTable},
-        paging::mapper::CleanUp,
+        paging::FrameAllocator,
         tss::TaskStateSegment,
     },
     VirtAddr,
@@ -105,20 +106,16 @@ unsafe extern "C" fn _start() -> ! {
 
     let memmap = SoosMemmap::from(limine_memmap);
 
-    SoosFrameAllocator::init_with_current_pagetable(memmap);
+    let kernel_heap = SoosFrameAllocator::init_with_current_pagetable(memmap, 0x1000);
 
     let kernel_page_table = paging::current_page_table();
     let mut _kernel_paging = SoosPaging::offset_page_table(hhdm.offset(), &mut *kernel_page_table);
     KERNEL_PAGING = &mut _kernel_paging;
     (*KERNEL_PAGING).load();
 
-    let heap = memmap
-        .iter()
-        .find(|entry| entry.len >= 100 * 1024 * 1024)
-        .expect("Failed to find a suitable heap location!");
-
     // no allocation before this point!
-    kernel::allocator::init_kernel_heap(heap.base).expect("Failed to init kernel heap!");
+    kernel::allocator::init_kernel_heap(kernel_heap, 0x1000 * 4096)
+        .expect("Failed to init kernel heap!");
 
     log::info!("SoOS version {}", env!("CARGO_PKG_VERSION"));
 
@@ -168,7 +165,7 @@ unsafe extern "C" fn _start() -> ! {
     {
         process::PROCESSES
             .lock()
-            .push(process::Process::user_from_elf(
+            .push_back(process::Process::user_from_elf(
                 hhdm.offset(),
                 ucs,
                 uds,
@@ -177,9 +174,41 @@ unsafe extern "C" fn _start() -> ! {
             ));
     }
 
-    debug!("VFS: ");
     {
-        FILE_SYSTEM.lock().print();
+        let mut fs = FILE_SYSTEM.lock();
+        debug!("VFS: ");
+        fs.create_file("/home/test", vfs::File::regular(b"Hello World!"));
+        fs.create_file(
+            "/proc/pci/devices",
+            vfs::File::special(
+                |_self, offset, writer| {
+                    if offset != 0 {
+                        return Err(crate::io::WriteError::InvalidOffset);
+                    }
+
+                    let mut written = 0;
+
+                    for dev in driver::pci::scan().expect("Failed to scan PCI devices!") {
+                        let line = alloc::format!(
+                            "Found PCI device: bus {} device {} function {} class {:?}\n",
+                            dev.bus,
+                            dev.device,
+                            dev.function,
+                            dev.header.class
+                        );
+
+                        writer.write(line.as_bytes())?;
+                        written += line.len();
+                    }
+
+                    writer.write(b"test\n")?;
+
+                    Ok(written)
+                },
+                |_, _, _| panic!("Not implemented!"),
+            ),
+        );
+        fs.print();
     }
 
     process::try_schedule().unwrap_or_else(|| {

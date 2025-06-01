@@ -49,7 +49,9 @@ void _start() {
                 command[command_len] = '\0';
 
                 print("\n");
-                run_command(command);
+                if (command_len > 0) {
+                    run_command(command);
+                }
 
                 command_len = 0;
                 memset(command, 0, sizeof(command)); // Clear the command buffer
@@ -82,12 +84,12 @@ void command_exit(uint64_t argc, const char **argv);
 void command_help(uint64_t argc, const char **argv);
 void command_ls(uint64_t argc, const char **argv);
 void command_fork(uint64_t argc, const char **argv);
+void command_clear(uint64_t argc, const char **argv);
+void command_cat(uint64_t argc, const char **argv);
 
 const struct Command commands[] = {
-    {.name = "exit", .func = command_exit},
-    {.name = "help", .func = command_help},
-    {.name = "ls", .func = command_ls},
-    {.name = "fork", .func = command_fork},
+    {.name = "exit", .func = command_exit}, {.name = "help", .func = command_help},   {.name = "ls", .func = command_ls},
+    {.name = "fork", .func = command_fork}, {.name = "clear", .func = command_clear}, {.name = "cat", .func = command_cat},
 };
 
 void run_command(const char *cmd) {
@@ -196,4 +198,45 @@ void command_fork(uint64_t argc, const char **argv) {
         print(buffer);
         print("\n");
     }
+}
+
+void command_clear(uint64_t argc, const char **argv) {
+    // Clear the screen
+    print("\033[2J\033[H");
+}
+
+void command_cat(uint64_t argc, const char **argv) {
+    if (argc != 2) {
+        print(ANSI_FG_RED "Usage: cat <file>\n");
+        return;
+    }
+
+    char buffer[4096] = {0};
+    int64_t fd = open(argv[1]);
+    if (fd < 0) {
+        print(ANSI_FG_RED "Error opening file: ");
+        print(argv[1]);
+        print("\n");
+        return;
+    }
+
+    uint64_t bytes_read = read(fd, buffer, sizeof(buffer) - 1);
+    if (bytes_read < 0) {
+        print(ANSI_FG_RED "Error reading file: ");
+        print(argv[1]);
+        print("\n");
+        return;
+    }
+    buffer[bytes_read] = '\0'; // Null-terminate the string
+
+    int64_t ret = close(fd);
+    if (ret < 0) {
+        print(ANSI_FG_RED "Error closing file: ");
+        print(argv[1]);
+        print("\n");
+        return;
+    }
+
+    print(buffer);
+    print("\n");
 }

@@ -214,7 +214,11 @@ extern "C" fn irq_handler(
                             }
                         },
                         pc_keyboard::DecodedKey::Unicode(char) => {
-                            if key_event.state == pc_keyboard::KeyState::Down {
+                            if MODIFIERS.lctrl {
+                                if let Some(digit) = char.to_digit(10) {
+                                    // switch to tty
+                                }
+                            } else if key_event.state == pc_keyboard::KeyState::Down {
                                 if char.is_ascii() {
                                     for process in crate::process::PROCESSES
                                         .try_lock()
@@ -335,28 +339,28 @@ extern "x86-interrupt" fn page_fault_handler(
 ) {
     let address = x86_64::registers::control::Cr2::read().expect("Failed to read CR2 register");
 
-    match crate::process::current_process_mut() {
-        Ok(mut process_lock) => {
-            let process = process_lock.get();
-            process.state = crate::process::State::Terminated(1);
-            log::warn!(
-                "Page fault in process {} ({:#x}): {:#0x?}, caused by address {:#0x}",
-                process.pid(),
-                err,
-                stack_frame,
-                address
-            );
+    if err.contains(PageFaultErrorCode::USER_MODE) {
+        let mut process_lock =
+            crate::process::current_process_mut().expect("Failed to get current process");
 
-            drop(process_lock);
+        let process = process_lock.get();
+        process.state = crate::process::State::Terminated(1);
+        log::warn!(
+            "Page fault in process {} ({:?}): {:#0x?}, caused by address {:#0x}",
+            process.pid(),
+            err,
+            stack_frame,
+            address
+        );
 
-            process::try_schedule().expect("Failed to schedule a process after page fault");
-        }
-        Err(()) => {
-            panic!(
-                "Page fault in kernel mode: {:#0x?}\nError code: {:#0x}\nAddress: {:#0x}",
-                stack_frame, err, address
-            );
-        }
+        drop(process_lock);
+
+        process::try_schedule().expect("Failed to schedule a process after page fault");
+    } else {
+        panic!(
+            "Page fault in kernel mode: {:#0x?}\nError code: {:?}\nAddress: {:#0x}",
+            stack_frame, err, address
+        );
     }
 }
 

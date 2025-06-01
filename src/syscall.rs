@@ -1,6 +1,11 @@
-use alloc::{string::String, vec};
+use alloc::{
+    string::{String, ToString},
+    vec,
+};
 use core::fmt::Write as _;
 use log::trace;
+
+use crate::process;
 
 /// Print the string in rbx with length rcx
 fn print(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
@@ -91,24 +96,23 @@ fn list_directory(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
 fn read(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
     let process = process_lock.get();
 
-    let fd = process.registers.rbx as usize;
-    let buffer = process.registers.rcx as *mut u8;
+    let fd = process.registers.rbx;
+    let dest = process.registers.rcx as usize;
     let length = process.registers.rdx as usize;
 
-    trace!("syscall_handler: read fd {fd}, buffer {buffer:?}, length {length}");
+    log::trace!("syscall_handler: read fd {fd}, buffer {dest:#0x}, length {length}");
 
     match fd {
+        // 0 is stdin
         0 => {
             if process.stdin.is_empty() {
                 process.state = crate::process::State::WaitingForStdin;
                 log::trace!("Process {} is waiting for stdin", process.pid());
             } else {
-                process.load_paging();
-
                 for i in 0..length {
                     match process.stdin.pop_front() {
                         Some(byte) => {
-                            unsafe { buffer.add(i).write_volatile(byte) };
+                            unsafe { ((dest + i) as *mut u8).write_volatile(byte) };
                         }
                         None => {
                             process.registers.rax = i as u64; // Number of bytes read
@@ -119,9 +123,31 @@ fn read(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
                 }
             }
         }
-        _ => {
-            log::warn!("Read from fd {fd} is not implemented");
-            process.registers.rax = 0; // No bytes read
+        fd => {
+            log::trace!("syscall_handler: read from file descriptor {fd}");
+
+            if let Some(fd) = process.file_descriptor_mut(process::FileDescriptor::from_u64(fd)) {
+                let mut fs = crate::FILE_SYSTEM
+                    .try_lock()
+                    .expect("Failed to lock file system");
+                let file = fs.file_mut(&fd.path).expect("File not found");
+
+                let mut buffer = vec![0; length];
+
+                let n = file
+                    .read(fd.offset, crate::io::Cursor::new(&mut buffer))
+                    .expect("Failed to read file");
+
+                for i in 0..n {
+                    unsafe { ((dest + i) as *mut u8).write_volatile(buffer[i]) };
+                }
+
+                fd.offset += n;
+                process.registers.rax = n as u64;
+            } else {
+                log::debug!("Invalid file descriptor: {}", fd);
+                process.registers.rax = -1i64 as u64; // indicate error
+            }
         }
     }
 }
@@ -135,10 +161,62 @@ fn fork(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
     let pid = new_process.pid();
     // return 0 in the new process
     new_process.registers.rax = 0;
-    process_lock.get_processes().push(new_process);
+    process_lock.get_processes().push_back(new_process);
 
     // return the pid of the new process in rax
     process_lock.get().registers.rax = pid as u64;
+}
+
+/// Open a file at the path in rbx, with the length in rcx
+/// Returns the file descriptor in rax
+fn open(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
+    let process = process_lock.get();
+
+    let mut path = vec![0; process.registers.rcx as usize];
+    for (i, byte) in path.iter_mut().enumerate() {
+        *byte = unsafe { (process.registers.rbx as *const u8).add(i).read() };
+    }
+    let path_str = core::str::from_utf8(&path).expect("Invalid UTF-8 string");
+
+    log::trace!("syscall_handler: open '{}'", path_str);
+
+    if let Some(_file) = crate::FILE_SYSTEM
+        .try_lock()
+        .expect("Failed to lock file system")
+        .file_mut(path_str)
+    {
+        let fd = process.new_file_descriptor(crate::process::ProcessFileDescriptor {
+            path: path_str.to_string(),
+            offset: 0,
+        });
+
+        process.registers.rax = fd.as_u64();
+    } else {
+        log::debug!("File not found: {}", path_str);
+        process.registers.rax = -1i64 as u64; // indicate error
+    }
+}
+
+/// Close the file descriptor in rbx
+/// Returns 0 in rax on success, -1 on error
+fn close(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
+    let process = process_lock.get();
+
+    match process.close_file_descriptor(crate::process::FileDescriptor::from_u64(
+        process.registers.rbx,
+    )) {
+        Some(_) => {
+            log::trace!(
+                "syscall_handler: closed file descriptor {}",
+                process.registers.rbx
+            );
+            process.registers.rax = 0; // success
+        }
+        None => {
+            log::debug!("Failed to close file descriptor {}", process.registers.rbx);
+            process.registers.rax = -1i64 as u64; // indicate error
+        }
+    }
 }
 
 /// Handle system calls
@@ -157,6 +235,8 @@ pub fn handle_syscall(process_lock: &mut crate::process::IndexedProcessGuard<'_>
         3 => list_directory(process_lock),
         4 => read(process_lock),
         5 => fork(process_lock),
+        6 => open(process_lock),
+        7 => close(process_lock),
         n => panic!("unknown syscall: {n:#x}"),
     }
 }

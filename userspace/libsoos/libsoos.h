@@ -12,3 +12,5 @@ void exit(uint64_t status);
 uint64_t listdir(const char *path, uint64_t index, char *buffer);
 uint64_t read(uint64_t fd, void *buffer, uint64_t size);
 uint32_t fork(void);
+int64_t open(const char *path);
+int64_t close(uint64_t fd);
