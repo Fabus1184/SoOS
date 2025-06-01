@@ -6,18 +6,21 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-aligned = "0.4.1"
+aligned = "0.4.2"
 anyhow = { version = "1.0.75", default-features = false }
 byte-unit = { version = "5.1.4", default-features = false, features = ["byte"] }
 chrono = { version = "0.4.31", default-features = false }
 elf_rs = "0.3.0"
+heapless = "0.8.0"
 include_bytes_aligned = "0.1.3"
-limine = "0.1.11"
+limine = "0.4.0"
 linked_list_allocator = "0.10.5"
 log = "0.4.19"
+pc-keyboard = "0.8.0"
 raw-cpuid = "11.0.1"
-spin = "0.9.8"
-x86_64 = { version = "0.14.10", default-features = false, features = [
+spin = "0.10.0"
+vte = { version = "0.15.0", default-features = false, features = ["ansi"] }
+x86_64 = { version = "0.15.2", default-features = false, features = [
     "abi_x86_interrupt",
     "instructions",
 ] }

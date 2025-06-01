@@ -14,20 +14,21 @@ mod kernel;
 mod pic;
 mod process;
 mod stuff;
+mod syscall;
 mod term;
+mod vfs;
 
 use core::arch::asm;
 
-use alloc::{borrow::ToOwned, format};
-use include_bytes_aligned::include_bytes_aligned;
-use log::{info, LevelFilter};
+use limine::request::{HhdmRequest, MemoryMapRequest, PagingModeRequest};
+use log::{debug, info, LevelFilter};
 
 use x86_64::{
     instructions::tables,
     registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
     structures::{
         gdt::{Descriptor, GlobalDescriptorTable},
-        paging::{FrameAllocator, PageTable},
+        paging::mapper::CleanUp,
         tss::TaskStateSegment,
     },
     VirtAddr,
@@ -35,56 +36,48 @@ use x86_64::{
 
 use crate::{
     driver::i8253,
-    kernel::{
-        logger::KernelLogger,
-        paging::{self, SoosFrameAllocator, SoosPaging},
-    },
+    kernel::paging::{self, SoosFrameAllocator, SoosPaging},
     stuff::memmap::SoosMemmap,
     term::TERM,
 };
 
-static MEMMAP_REQUEST: limine::MemmapRequest = limine::MemmapRequest::new(0);
+static MEMMAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
 
-static PAGING_MODE_REQUEST: limine::PagingModeRequest =
-    limine::PagingModeRequest::new(0).mode(limine::PagingMode::Lvl4);
+static PAGING_MODE_REQUEST: PagingModeRequest =
+    PagingModeRequest::new().with_mode(limine::paging::Mode::FOUR_LEVEL);
 
-static HHDM_REQUEST: limine::HhdmRequest = limine::HhdmRequest::new(0);
-
-const BANNER: &[&str] = &[
-    r#""#,
-    r#".d88888b            .88888.  .d88888b "#,
-    r#"88.    "'          d8'   `8b 88.    "'"#,
-    r#"`Y88888b. .d8888b. 88     88 `Y88888b."#,
-    r#"      `8b 88'  `88 88     88       `8b"#,
-    r#"d8'   .8P 88.  .88 Y8.   .8P d8'   .8P"#,
-    r#" Y88888P  `88888P'  `8888P'   Y88888P "#,
-    r#""#,
-];
+static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
 
 static mut KERNEL_PAGING: *mut SoosPaging = core::ptr::null_mut();
 
+static FILE_SYSTEM: spin::Lazy<spin::Mutex<vfs::Directory>> =
+    spin::Lazy::new(|| spin::Mutex::new(vfs::Directory::new(&["home", "bin"])));
+
+static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
+const KERNEL_STACK_SIZE: usize = 4192 * 100;
+const KERNEL_STACK_POINTER: fn() -> u64 =
+    || unsafe { KERNEL_STACK.as_mut_ptr() as u64 + KERNEL_STACK.len() as u64 - 1 };
+
 #[no_mangle]
 unsafe extern "C" fn _start() -> ! {
-    static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
-    const KERNEL_STACK_SIZE: usize = 4192 * 100;
-    let kernel_stack_pointer = KERNEL_STACK.as_mut_ptr() as u64 + KERNEL_STACK.len() as u64;
+    kernel::logger::init(LevelFilter::Debug);
 
     static mut TSS: TaskStateSegment = TaskStateSegment::new();
     TSS.privilege_stack_table = [
-        VirtAddr::new(kernel_stack_pointer),
+        VirtAddr::new(KERNEL_STACK_POINTER()),
         VirtAddr::zero(),
         VirtAddr::zero(),
     ];
     for i in 0..7 {
-        TSS.interrupt_stack_table[i] = VirtAddr::new(kernel_stack_pointer);
+        TSS.interrupt_stack_table[i] = VirtAddr::new(KERNEL_STACK_POINTER());
     }
 
     static mut GDT: GlobalDescriptorTable = GlobalDescriptorTable::new();
-    let cs = GDT.add_entry(Descriptor::kernel_code_segment());
-    let ds = GDT.add_entry(Descriptor::kernel_data_segment());
-    let ucs = GDT.add_entry(Descriptor::user_code_segment());
-    let uds = GDT.add_entry(Descriptor::user_data_segment());
-    let tss = GDT.add_entry(Descriptor::tss_segment(&TSS));
+    let cs = GDT.append(Descriptor::kernel_code_segment());
+    let ds = GDT.append(Descriptor::kernel_data_segment());
+    let ucs = GDT.append(Descriptor::user_code_segment());
+    let uds = GDT.append(Descriptor::user_data_segment());
+    let tss = GDT.append(Descriptor::tss_segment(&TSS));
 
     GDT.load();
 
@@ -97,32 +90,25 @@ unsafe extern "C" fn _start() -> ! {
 
     tables::load_tss(tss);
 
-    TERM.set_color(0xFF00FF00, 0xFF000000);
-
     let paging = PAGING_MODE_REQUEST
         .get_response()
-        .get()
         .expect("Failed to get paging mode!");
-    if paging.mode != limine::PagingMode::Lvl4 {
+    if paging.mode() != limine::paging::Mode::FOUR_LEVEL {
         panic!("Failed to enable 4-level paging!");
     }
 
-    let hhdm = HHDM_REQUEST
-        .get_response()
-        .get()
-        .expect("Failed to get HHDM!");
+    let hhdm = HHDM_REQUEST.get_response().expect("Failed to get HHDM!");
 
     let limine_memmap = MEMMAP_REQUEST
         .get_response()
-        .get()
         .expect("Failed to get memmap!");
 
     let memmap = SoosMemmap::from(limine_memmap);
 
-    let frame_allocator = SoosFrameAllocator::get_or_init_with_current_pagetable(memmap);
+    SoosFrameAllocator::init_with_current_pagetable(memmap);
 
     let kernel_page_table = paging::current_page_table();
-    let mut _kernel_paging = SoosPaging::offset_page_table(hhdm.offset, &mut *kernel_page_table);
+    let mut _kernel_paging = SoosPaging::offset_page_table(hhdm.offset(), &mut *kernel_page_table);
     KERNEL_PAGING = &mut _kernel_paging;
     (*KERNEL_PAGING).load();
 
@@ -134,22 +120,16 @@ unsafe extern "C" fn _start() -> ! {
     // no allocation before this point!
     kernel::allocator::init_kernel_heap(heap.base).expect("Failed to init kernel heap!");
 
-    KernelLogger::new(LevelFilter::Debug).init();
+    log::info!("SoOS version {}", env!("CARGO_PKG_VERSION"));
 
-    for line in BANNER {
-        TERM.println(line);
-    }
-    TERM.print("Version ");
-    TERM.println(env!("CARGO_PKG_VERSION"));
-
-    TERM.println("Memory map:");
+    log::info!("Memory map:");
     for entry in memmap.iter() {
-        TERM.println(&format!(
+        log::info!(
             "  {:#x} {:#} - {:?}",
             entry.base,
             byte_unit::Byte::from_u64(entry.len),
             entry.type_
-        ));
+        );
     }
 
     idt::load_idt();
@@ -185,74 +165,26 @@ unsafe extern "C" fn _start() -> ! {
             );
         });
 
-    let process_page_table = frame_allocator
-        .allocate_frame()
-        .expect("Failed to allocate frame!")
-        .start_address()
-        .as_u64() as *mut PageTable;
-
-    (*KERNEL_PAGING)
-        .offset_page_table
-        .level_4_table()
-        .clone_into(&mut *process_page_table);
-
-    info!(
-        "Address of page table: {:#x}",
-        process_page_table as *const _ as u64
-    );
-    let mut process_paging = SoosPaging::offset_page_table(hhdm.offset, &mut *process_page_table);
-
-    let (userspace_address, userspace_stack) = elf::load(
-        &mut process_paging,
-        &mut *KERNEL_PAGING,
-        frame_allocator,
-        include_bytes_aligned!(32, "../userspace/build/fib"),
-        VirtAddr::new(0x0000_1234_0000_0000),
-    );
-
-    info!(
-        "ELF loaded at {:?}, stack at {:?}",
-        userspace_address, userspace_stack
-    );
-
     {
         process::PROCESSES
             .lock()
-            .push(process::Process::user_process(
-                123,
-                process_paging,
+            .push(process::Process::user_from_elf(
+                hhdm.offset(),
                 ucs,
                 uds,
                 0x202,
-                userspace_address.as_u64(),
-                userspace_stack.as_u64(),
+                include_bytes_aligned::include_bytes_aligned!(32, "../userspace/build/sosh"),
             ));
     }
 
+    debug!("VFS: ");
     {
-        process::PROCESSES
-            .lock()
-            .push(process::Process::kernel_process(
-                0,
-                CS::get_reg(),
-                DS::get_reg(),
-                0x202,
-                kernel_process as usize as u64,
-                kernel_stack_pointer,
-            ));
+        FILE_SYSTEM.lock().print();
     }
 
     process::try_schedule().unwrap_or_else(|| {
         panic!("No process ready to run!");
     });
-}
-
-fn kernel_process() {
-    log::trace!("Kernel process running...");
-    for _ in 0..100_000 {
-        core::hint::spin_loop();
-    }
-    process::try_schedule().expect("Failed to schedule a process!");
 }
 
 extern "C" {

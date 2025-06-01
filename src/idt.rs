@@ -1,5 +1,5 @@
-use alloc::vec;
-use log::{debug, error, trace};
+use log::{debug, trace, warn};
+use pc_keyboard::{KeyboardLayout, ScancodeSet};
 use x86_64::{
     structures::{
         idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
@@ -10,7 +10,8 @@ use x86_64::{
 
 use crate::{
     driver::{self},
-    term::TERM,
+    process,
+    syscall::handle_syscall,
 };
 
 pub static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
@@ -74,6 +75,10 @@ pub fn load_idt() {
     }
 }
 
+extern "x86-interrupt" fn other_handler(stack_frame: InterruptStackFrame) {
+    panic!("Unhandled interrupt: {:#?}", stack_frame);
+}
+
 extern "C" {
     fn syscall_handler_asm_stub();
     fn irq0();
@@ -126,43 +131,20 @@ pub unsafe extern "C" fn syscall_handler(
     registers: GPRegisters,
     stack_frame: InterruptStackFrame,
 ) {
-    match registers.rax {
-        0 => {
-            trace!(
-                "syscall_handler: print {:#x} {:#x}",
-                registers.rbx,
-                registers.rcx
-            );
+    let mut process_lock =
+        crate::process::current_process_mut().expect("failed to get current process");
+    let process = process_lock.get();
 
-            // print
-            let mut bytes = vec![0; registers.rcx as usize];
-            for (i, byte) in bytes.iter_mut().enumerate() {
-                *byte = (registers.rbx as *const u8).add(i).read();
-            }
+    process.flags = stack_frame.cpu_flags.bits();
+    process.rip = stack_frame.instruction_pointer.as_u64();
+    process.registers = crate::idt::GPRegisters {
+        rsp: stack_frame.stack_pointer.as_u64(),
+        ..registers
+    };
 
-            let str = core::str::from_utf8(&bytes).expect("Invalid UTF-8 string");
-            TERM.print(str);
+    handle_syscall(&mut process_lock);
 
-            crate::process::store_current_process_registers(stack_frame, registers);
-        }
-        1 => {
-            // sleep for rbx ms
-            trace!("syscall_handler: sleep {:#x}", registers.rbx);
-            crate::process::set_current_process_state(crate::process::State::Sleeping(unsafe {
-                crate::i8253::TIMER0.ticks() + registers.rbx / 100
-            }));
-
-            crate::process::store_current_process_registers(stack_frame, registers);
-        }
-        2 => {
-            // exit
-            trace!("syscall_handler: exit {:#x}", registers.rbx);
-            crate::process::terminate_current_process();
-        }
-        n => {
-            panic!("syscall_handler: unknown syscall: {:#x}", n);
-        }
-    }
+    drop(process_lock);
 
     crate::process::try_schedule().expect("Failed to schedule a process");
 }
@@ -193,7 +175,69 @@ extern "C" fn irq_handler(
         },
         1 => unsafe {
             let scancode: u8 = PortRead::read_from_port(0x60);
-            debug!("scancode: {}", scancode);
+            trace!("scancode: {}", scancode);
+
+            static mut KEYBOARD: pc_keyboard::ScancodeSet1 = pc_keyboard::ScancodeSet1::new();
+            match KEYBOARD.advance_state(scancode) {
+                Ok(Some(key_event)) => {
+                    static mut MODIFIERS: pc_keyboard::Modifiers = pc_keyboard::Modifiers {
+                        lshift: false,
+                        rshift: false,
+                        lctrl: false,
+                        rctrl: false,
+                        numlock: false,
+                        capslock: false,
+                        lalt: false,
+                        ralt: false,
+                        rctrl2: false,
+                    };
+
+                    let key = pc_keyboard::layouts::De105Key {}.map_keycode(
+                        key_event.code,
+                        &MODIFIERS,
+                        pc_keyboard::HandleControl::Ignore,
+                    );
+
+                    match key {
+                        pc_keyboard::DecodedKey::RawKey(key) => match key {
+                            pc_keyboard::KeyCode::LShift => {
+                                MODIFIERS.lshift = key_event.state == pc_keyboard::KeyState::Down;
+                            }
+                            pc_keyboard::KeyCode::LAlt => {
+                                MODIFIERS.lalt = key_event.state == pc_keyboard::KeyState::Down;
+                            }
+                            pc_keyboard::KeyCode::LControl => {
+                                MODIFIERS.lctrl = key_event.state == pc_keyboard::KeyState::Down;
+                            }
+                            _ => {
+                                log::debug!("unhandled raw key: {:?}", key);
+                            }
+                        },
+                        pc_keyboard::DecodedKey::Unicode(char) => {
+                            if key_event.state == pc_keyboard::KeyState::Down {
+                                if char.is_ascii() {
+                                    for process in crate::process::PROCESSES
+                                        .try_lock()
+                                        .expect("Failed to lock processes")
+                                        .iter_mut()
+                                    {
+                                        process.stdin.push_back(char as u8);
+                                    }
+                                } else {
+                                    warn!(
+                                        "Non-ASCII character received from keyboard: '{}'",
+                                        char.escape_unicode()
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    warn!("Failed to advance keyboard state: {:?}", e);
+                }
+            }
         },
         _ => {
             debug!("irq: {}", irq);
@@ -206,9 +250,9 @@ extern "C" fn irq_handler(
 
     unsafe {
         crate::do_iret(
-            stack_frame.code_segment,
-            stack_frame.stack_segment,
-            stack_frame.cpu_flags,
+            stack_frame.code_segment.0 as u64,
+            stack_frame.stack_segment.0 as u64,
+            stack_frame.cpu_flags.bits(),
             stack_frame.instruction_pointer.as_u64(),
             &GPRegisters {
                 rsp: stack_frame.stack_pointer.as_u64(),
@@ -289,10 +333,31 @@ extern "x86-interrupt" fn page_fault_handler(
     stack_frame: InterruptStackFrame,
     err: PageFaultErrorCode,
 ) {
-    panic!(
-        "EXCEPTION: KERNEL PAGE FAULT {:#x?}\n Error code: {:?}",
-        stack_frame, err
-    );
+    let address = x86_64::registers::control::Cr2::read().expect("Failed to read CR2 register");
+
+    match crate::process::current_process_mut() {
+        Ok(mut process_lock) => {
+            let process = process_lock.get();
+            process.state = crate::process::State::Terminated(1);
+            log::warn!(
+                "Page fault in process {} ({:#x}): {:#0x?}, caused by address {:#0x}",
+                process.pid(),
+                err,
+                stack_frame,
+                address
+            );
+
+            drop(process_lock);
+
+            process::try_schedule().expect("Failed to schedule a process after page fault");
+        }
+        Err(()) => {
+            panic!(
+                "Page fault in kernel mode: {:#0x?}\nError code: {:#0x}\nAddress: {:#0x}",
+                stack_frame, err, address
+            );
+        }
+    }
 }
 
 extern "x86-interrupt" fn security_exception_handler(stack_frame: InterruptStackFrame, err: u64) {

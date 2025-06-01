@@ -31,7 +31,7 @@ run: $(LIMINE_FILES) $(LIMINE_BIN)
 
 	$(LIMINE_BIN) bios-install SoOS.iso
 
-	qemu-system-x86_64 -cpu qemu64,+la57 -cdrom SoOS.iso -d guest_errors -m 8G -d cpu_reset -M smm=off -s -no-reboot
+	qemu-system-x86_64 -cpu qemu64,+la57 -cdrom SoOS.iso -d guest_errors,cpu_reset -m 8G -M smm=off -s -no-shutdown -S
 
 $(LIMINE_FILES) $(LIMINE_BIN): $(LIMINE)
 	cd $(LIMINE) && ./configure --enable-bios --enable-bios-cd --enable-uefi-x86-64 --enable-uefi-cd && make -j$(nproc)

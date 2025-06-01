@@ -27,10 +27,16 @@ pub fn load(
     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
     bytes: &[u8],
     code_address: VirtAddr,
-) -> (VirtAddr, VirtAddr) {
-    unsafe { process_paging.load() };
+) -> (
+    VirtAddr,
+    VirtAddr,
+    alloc::vec::Vec<(x86_64::structures::paging::Page, PageTableFlags)>,
+) {
+    process_paging.load();
 
     let elf = Elf::from_bytes(bytes).expect("Failed to parse ELF!");
+
+    let mut pages = alloc::vec::Vec::with_capacity(10);
 
     elf.program_header_iter().for_each(|ph| match ph.ph_type() {
         ProgramType::LOAD => {
@@ -121,6 +127,8 @@ pub fn load(
                         .expect("Failed to map page!")
                         .flush()
                 };
+
+                pages.push((page, flags));
             }
         }
     });
@@ -143,10 +151,12 @@ pub fn load(
                 .expect("Failed to map page!")
                 .flush()
         };
+
+        pages.push((page, flags));
     }
     let stack_pointer = stack_address + stack_size_pages * Size4KiB::SIZE - 0x100_u64;
 
-    unsafe { kernel_paging.load() };
+    kernel_paging.load();
 
-    (code_address + elf.entry_point(), stack_pointer)
+    (code_address + elf.entry_point(), stack_pointer, pages)
 }

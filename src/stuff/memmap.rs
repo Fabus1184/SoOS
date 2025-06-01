@@ -1,7 +1,5 @@
-use limine::MemmapResponse;
-
 #[derive(Debug, Copy, Clone, PartialEq)]
-#[repr(u32)]
+#[repr(u64)]
 #[allow(dead_code)]
 pub enum MemmapEntryType {
     Usable = 0,
@@ -38,16 +36,18 @@ impl SoosMemmap {
     }
 }
 
-impl From<&MemmapResponse> for SoosMemmap {
-    fn from(limine_memmap: &MemmapResponse) -> Self {
+impl From<&limine::response::MemoryMapResponse> for SoosMemmap {
+    fn from(limine_memmap: &limine::response::MemoryMapResponse) -> Self {
         let mut memmap = [None; 128];
 
-        for (i, entry) in limine_memmap.memmap().iter().enumerate() {
+        for (i, entry) in limine_memmap.entries().iter().enumerate() {
             memmap[i] = Some(MemmapEntry {
                 base: entry.base,
-                len: entry.len,
+                len: entry.length,
                 type_: unsafe {
-                    core::mem::transmute::<limine::MemoryMapEntryType, MemmapEntryType>(entry.typ)
+                    core::mem::transmute::<limine::memory_map::EntryType, MemmapEntryType>(
+                        entry.entry_type,
+                    )
                 },
             });
         }
