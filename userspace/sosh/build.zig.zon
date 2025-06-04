@@ -1,0 +1,17 @@
+.{
+    .name = .sosh,
+    .version = "0.0.0",
+    .fingerprint = 0x5c3e9f2ccd5ba858, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.14.0",
+    .dependencies = .{
+        .libsoos = .{ .path = "../libsoos" },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        // For example...
+        //"LICENSE",
+        //"README.md",
+    },
+}

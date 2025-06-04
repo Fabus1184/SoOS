@@ -2,8 +2,8 @@ use alloc::borrow::ToOwned as _;
 use x86_64::{
     registers::control::Cr3,
     structures::paging::{
-        page_table::FrameError, FrameAllocator, FrameDeallocator, Mapper, OffsetPageTable, Page,
-        PageTable, PageTableFlags, PhysFrame, Size4KiB,
+        FrameAllocator, FrameDeallocator, MappedPageTable, Mapper, OffsetPageTable, Page,
+        PageTable, PageTableFlags, PhysFrame, Size4KiB, Translate,
     },
     PhysAddr, VirtAddr,
 };
@@ -17,7 +17,7 @@ pub fn current_page_table() -> *mut PageTable {
 
 #[derive(Debug)]
 pub struct SoosPaging<'a> {
-    pub offset_page_table: OffsetPageTable<'a>,
+    pub offset_page_table: MappedPageTable<'a>,
 }
 
 impl<'a> SoosPaging<'a> {
@@ -30,18 +30,25 @@ impl<'a> SoosPaging<'a> {
 
     pub fn load(&mut self) {
         let flags = Cr3::read().1;
+        let addr = core::ptr::from_ref(self.offset_page_table.level_4_table()) as u64;
+        let physical_address = self
+            .offset_page_table
+            .translate_addr(VirtAddr::new(addr))
+            .expect("Failed to translate address");
+
+        log::debug!(
+            "Loading page table at {:#x} with flags",
+            physical_address.as_u64(),
+        );
+
         unsafe {
-            Cr3::write(
-                PhysFrame::containing_address(PhysAddr::new(
-                    self.offset_page_table.level_4_table() as *const _ as u64,
-                )),
-                flags,
-            )
-        };
+            Cr3::write(PhysFrame::containing_address(physical_address), flags);
+        }
     }
 
     pub fn fork(&self, pages: &[(Page, PageTableFlags)]) -> Self {
-        (unsafe { &mut *crate::KERNEL_PAGING }).load();
+        let mut kernel_paging = crate::KERNEL_PAGING.lock();
+        kernel_paging.load();
 
         let frame_allocator = unsafe {
             SOOS_FRAME_ALLOCATOR
@@ -55,7 +62,7 @@ impl<'a> SoosPaging<'a> {
             .start_address()
             .as_u64() as *mut x86_64::structures::paging::PageTable;
 
-        (unsafe { &*crate::KERNEL_PAGING })
+        kernel_paging
             .offset_page_table
             .level_4_table()
             .clone_into(unsafe { &mut *new_pagetable });
@@ -92,7 +99,7 @@ impl<'a> SoosPaging<'a> {
 
             // map old and new frames to temporary pages
             unsafe {
-                (*crate::KERNEL_PAGING)
+                kernel_paging
                     .offset_page_table
                     .map_to(
                         Page::<Size4KiB>::containing_address(virt_addr),
@@ -103,7 +110,7 @@ impl<'a> SoosPaging<'a> {
                     .expect("Failed to map frame in cloned page table")
                     .flush();
 
-                (*crate::KERNEL_PAGING)
+                kernel_paging
                     .offset_page_table
                     .map_to(
                         Page::containing_address(virt_addr + 0x1000),
@@ -121,20 +128,20 @@ impl<'a> SoosPaging<'a> {
                 unsafe {
                     (virt_addr + 0x1000 + i)
                         .as_mut_ptr::<u8>()
-                        .write_volatile(old_byte)
-                };
+                        .write_volatile(old_byte);
+                }
             }
 
             // unmap the temporary pages
             unsafe {
-                let (frame, flush) = (*crate::KERNEL_PAGING)
+                let (frame, flush) = kernel_paging
                     .offset_page_table
                     .unmap(Page::<Size4KiB>::containing_address(virt_addr))
                     .expect("Failed to unmap old frame in cloned page table");
                 frame_allocator.deallocate_frame(frame);
                 flush.flush();
 
-                let (frame, flush) = (*crate::KERNEL_PAGING)
+                let (frame, flush) = kernel_paging
                     .offset_page_table
                     .unmap(Page::<Size4KiB>::containing_address(virt_addr + 0x1000))
                     .expect("Failed to unmap new frame in cloned page table");
@@ -147,7 +154,7 @@ impl<'a> SoosPaging<'a> {
     }
 }
 
-const MAX_USABLE_FRAMES: usize = 1 << 24;
+const MAX_USABLE_FRAMES: usize = 1 << 10;
 
 pub static mut SOOS_FRAME_ALLOCATOR: Option<SoosFrameAllocator> = None;
 
@@ -155,86 +162,44 @@ pub static mut SOOS_FRAME_ALLOCATOR: Option<SoosFrameAllocator> = None;
 pub struct SoosFrameAllocator {
     bitmap: &'static mut [bool; MAX_USABLE_FRAMES],
     memmap: SoosMemmap,
-    skip: usize,
 }
 
 impl SoosFrameAllocator {
-    pub fn init_with_current_pagetable(
-        memmap: SoosMemmap,
-        reserve_contiguous_frames: usize,
-    ) -> u64 {
+    pub fn init_empty(memmap: &SoosMemmap) {
         static mut BITMAP: [bool; MAX_USABLE_FRAMES] = [false; MAX_USABLE_FRAMES];
 
         unsafe {
-            SOOS_FRAME_ALLOCATOR.get_or_insert_with(|| {
-                let self_ = Self {
-                    memmap,
-                    skip: 0,
-                    bitmap: &mut BITMAP,
-                };
-
-                let page_table = &*current_page_table();
-                page_table.iter().for_each(|entry| match entry.frame() {
-                    Ok(frame) => {
-                        let i = frame.start_address().as_u64() as usize / 4096;
-                        self_.bitmap[i] = true;
-                    }
-                    Err(FrameError::HugeFrame) => {
-                        panic!("Huge frame!");
-                    }
-                    Err(FrameError::FrameNotPresent) => {}
-                });
-
-                self_
+            SOOS_FRAME_ALLOCATOR.get_or_insert(Self {
+                memmap: *memmap,
+                bitmap: &mut BITMAP,
             })
         };
-
-        let reserved_address = 0x7777_0000;
-
-        // reserve contiguous frames not to be allocated
-        for i in 0..reserve_contiguous_frames {
-            let frame = PhysFrame::<Size4KiB>::containing_address(PhysAddr::new(
-                reserved_address + i as u64 * 4096,
-            ));
-            let index = frame.start_address().as_u64() as usize / 4096;
-            unsafe {
-                SOOS_FRAME_ALLOCATOR.as_mut().unwrap().bitmap[index] = true;
-            }
-        }
-
-        // return the address of the reserved frames
-        reserved_address
     }
 }
 
 unsafe impl FrameAllocator<Size4KiB> for SoosFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
-        let f = self
+        let address = self
             .memmap
             .iter_usable_addresses()
             .step_by(4096)
-            .skip(self.skip)
-            .map(|a| PhysFrame::containing_address(PhysAddr::new(a)))
-            .find(|&f| {
-                let i = f.start_address().as_u64() as usize / 4096;
-                !self.bitmap[i]
-            });
+            .take_while(|&addr| addr < 0x1_000_000)
+            .find(|&addr| (!self.bitmap[addr as usize / 4096]))
+            .expect("No free frames available");
 
-        if f.is_some() {
-            let i = f.unwrap().start_address().as_u64() as usize / 4096;
-            self.bitmap[i] = true;
-            self.skip = i;
-            f
-        } else {
-            self.skip = 0;
-            self.allocate_frame()
-        }
+        self.bitmap[address as usize / 4096] = true;
+
+        log::debug!("allocated frame at {address:#0x}");
+
+        Some(PhysFrame::containing_address(PhysAddr::new(address)))
     }
 }
 
 impl FrameDeallocator<Size4KiB> for SoosFrameAllocator {
     unsafe fn deallocate_frame(&mut self, frame: PhysFrame<Size4KiB>) {
         let i = frame.start_address().as_u64() as usize / 4096;
-        self.bitmap[i] = false;
+        if i < self.bitmap.len() {
+            self.bitmap[i] = false;
+        }
     }
 }

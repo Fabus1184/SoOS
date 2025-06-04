@@ -34,7 +34,7 @@ pub enum State {
 pub struct Process {
     pid: u32,
     pub state: State,
-    paging: SoosPaging<'static>,
+    pub paging: SoosPaging<'static>,
     cs: x86_64::structures::gdt::SegmentSelector,
     ds: x86_64::structures::gdt::SegmentSelector,
     pub flags: u64,
@@ -85,6 +85,8 @@ impl Process {
     ) -> Self {
         let pid = PID_FACTORY.next_pid();
 
+        log::debug!("loading process with pid {pid}");
+
         let frame_allocator = unsafe {
             crate::kernel::paging::SOOS_FRAME_ALLOCATOR
                 .as_mut()
@@ -98,26 +100,25 @@ impl Process {
             .as_u64()
             as *mut x86_64::structures::paging::PageTable;
 
-        (unsafe { &*crate::KERNEL_PAGING })
-            .offset_page_table
-            .level_4_table()
-            .clone_into(unsafe { &mut *process_page_table });
+        log::debug!("process page table at {:#x}", process_page_table as u64);
 
-        log::debug!(
-            "page table for pid {pid}: {:#x}",
-            process_page_table as *const _ as u64
-        );
+        {
+            let kernel_paging = crate::KERNEL_PAGING
+                .try_lock()
+                .expect("Failed to lock kernel paging");
+            kernel_paging
+                .offset_page_table
+                .level_4_table()
+                .clone_into(unsafe { &mut *process_page_table });
+        }
+
+        log::debug!("page table for pid {pid}: {:#x}", process_page_table as u64);
 
         let mut paging =
             SoosPaging::offset_page_table(hhdm_offset, unsafe { &mut *process_page_table });
 
-        let (userspace_address, userspace_stack, mapped_pages) = crate::elf::load(
-            &mut paging,
-            unsafe { &mut *crate::KERNEL_PAGING },
-            frame_allocator,
-            elf,
-            x86_64::VirtAddr::new(0x0000_1234_0000_0000),
-        );
+        let (userspace_address, userspace_stack, mapped_pages) =
+            crate::elf::load(&mut paging, frame_allocator, elf);
 
         log::debug!("elf for pid {pid} loaded at address {userspace_address:#x}, stack at {userspace_stack:#x}");
 
@@ -297,7 +298,6 @@ pub fn try_schedule() -> Option<!> {
                 drop(processes);
                 x86_64::instructions::interrupts::enable_and_hlt();
                 x86_64::instructions::interrupts::disable();
-                continue;
             }
             None => return None,
         }

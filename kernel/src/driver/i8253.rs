@@ -1,7 +1,7 @@
 use x86_64::structures::port::{PortRead, PortWrite};
 
 #[repr(u8)]
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 #[allow(dead_code)]
 pub enum Channel {
     CH0 = 0b00000000,
@@ -10,7 +10,7 @@ pub enum Channel {
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 #[allow(dead_code)]
 pub enum AccessMode {
     Latch = 0b00000000,
@@ -20,7 +20,7 @@ pub enum AccessMode {
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 #[allow(dead_code)]
 pub enum OperatingMode {
     InterruptOnTerminalCount = 0b00000000,
@@ -32,7 +32,7 @@ pub enum OperatingMode {
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 #[allow(dead_code)]
 pub enum BCDMode {
     Binary = 0b00000000,
@@ -113,6 +113,15 @@ impl Timer {
         self.bcd_mode = bcd_mode;
         self.frequency = hz;
         self.ticks = 0;
+
+        log::debug!(
+            "Timer initialized: channel={:?}, access_mode={:?}, operating_mode={:?}, bcd_mode={:?}, frequency={}Hz",
+            self.channel,
+            self.access_mode,
+            self.operating_mode,
+            self.bcd_mode,
+            self.frequency
+        );
     }
 
     pub fn tick(&mut self) {

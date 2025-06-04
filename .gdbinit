@@ -1,2 +1,2 @@
 target remote localhost:1234
-add-symbol-file userspace/build/sosh 0x123400001000
+add-symbol-file build/kernel/x86_64-unknown-none/debug/soos 0xffffffff80000000

@@ -4,5 +4,8 @@
         "--target",
         "x86_64-unknown-none"
     ],
-    "rust-analyzer.showUnlinkedFileNotification": false
+    "rust-analyzer.showUnlinkedFileNotification": false,
+    "rust-analyzer.linkedProjects": [
+        "${workspaceFolder}/kernel/Cargo.toml",
+    ]
 }

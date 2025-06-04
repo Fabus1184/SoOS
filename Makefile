@@ -1,39 +1,46 @@
-LIMINE=limine-9.3.3
-LIMINE_BIN=limine-9.3.3/bin/limine
+LIMINE=build/limine-9.3.3
+LIMINE_BIN=build/limine-9.3.3/bin/limine
 LIMINE_FILES = $(patsubst %, $(LIMINE)/bin/%, limine-bios.sys limine-bios-cd.bin limine-uefi-cd.bin)
 
 RELEASE=
 
+KERNEL=build/kernel/x86_64-unknown-none/$(if $(RELEASE),release,debug)/soos
+KERNEL_SOURCES := $(shell find kernel -type f)
+
 clean:
 	rm SoOS.iso || true
+	rm -rf build/* || true
 
-run: $(LIMINE_FILES) $(LIMINE_BIN)
-	make -C userspace
+$(LIMINE): limine-9.3.3.tar.gz
+	mkdir -p $(LIMINE)
+	tar -xzf limine-9.3.3.tar.gz -C build
 
-	@echo "Limine files: $(LIMINE_FILES)"
+$(LIMINE_FILES) $(LIMINE_BIN): $(LIMINE)
+	cd $(LIMINE) && ./configure --enable-bios --enable-bios-cd --enable-uefi-x86-64 --enable-uefi-cd && make -j$(nproc)
 
-	cargo build $(if $(RELEASE),--release)
-	
-	rm -rf iso_root || true
-	rm -f SoOS.iso || true
+build/userspace/bin:
+	mkdir -p build/userspace/bin
 
-	mkdir -p iso_root
+build/userspace/bin/sosh: userspace/sosh build/userspace/bin
+	cd $< && zig build -p ../../build/userspace
 
-	cp -v target/x86_64-unknown-none/$(if $(RELEASE),release,debug)/soos iso_root/kernel.elf
-	cp -v limine.conf $(LIMINE_FILES) iso_root/
+$(KERNEL): build/userspace/bin/sosh $(KERNEL_SOURCES)
+	cd kernel && cargo build $(if $(RELEASE),--release)
 
-	mkdir -p iso_root/EFI/BOOT
-	cp -v $(LIMINE)/bin/BOOT*.EFI iso_root/EFI/BOOT/
+build/iso-root: $(KERNEL) $(LIMINE_FILES)
+	mkdir -p build/iso-root
+	cp -v $(KERNEL) build/iso-root/kernel.elf
+	cp -v limine.conf $(LIMINE_FILES) build/iso-root/
+	mkdir -p build/iso-root/EFI/BOOT
+	cp -v $(LIMINE)/bin/BOOT*.EFI build/iso-root/EFI/BOOT/
 
+run: $(LIMINE_FILES) $(LIMINE_BIN) build/iso-root $(KERNEL)
 	xorriso -as mkisofs -b limine-bios-cd.bin \
 		-no-emul-boot -boot-load-size 4 -boot-info-table \
 		--efi-boot limine-uefi-cd.bin \
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
-		iso_root -o SoOS.iso
+		build/iso-root -o build/SoOS.iso
 
-	$(LIMINE_BIN) bios-install SoOS.iso
+	$(LIMINE_BIN) bios-install build/SoOS.iso
 
-	qemu-system-x86_64 -cpu qemu64,+la57 -cdrom SoOS.iso -d guest_errors,cpu_reset -m 8G -M smm=off -s -no-shutdown
-
-$(LIMINE_FILES) $(LIMINE_BIN): $(LIMINE)
-	cd $(LIMINE) && ./configure --enable-bios --enable-bios-cd --enable-uefi-x86-64 --enable-uefi-cd && make -j$(nproc)
+	qemu-system-x86_64 -cpu qemu64,+la57 -cdrom build/SoOS.iso -d guest_errors,cpu_reset -m 8G -M smm=off -s -no-shutdown -no-reboot

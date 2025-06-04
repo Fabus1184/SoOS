@@ -1,5 +1,3 @@
-iso_root/
-target/
-SoOS.iso
-userspace/build/*
-limine*
+.zig-cache
+build
+limine-9.3.3

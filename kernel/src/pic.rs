@@ -37,4 +37,6 @@ pub fn init() {
         PortWrite::write_to_port(0x21, 0x00_u8);
         PortWrite::write_to_port(0xA1, 0x00_u8);
     }
+
+    log::debug!("pic initialized");
 }

@@ -58,7 +58,7 @@ impl Directory {
             .split('/')
             .filter(|s| !s.is_empty())
             .collect::<alloc::vec::Vec<_>>();
-        self._directory(path.as_slice())
+        self.directory_impl(path.as_slice())
     }
 
     pub fn directory_mut(&mut self, path: &str) -> Option<&mut Directory> {
@@ -66,28 +66,28 @@ impl Directory {
             .split('/')
             .filter(|s| !s.is_empty())
             .collect::<alloc::vec::Vec<_>>();
-        self._directory_mut(path.as_slice())
+        self.directory_mut_impl(path.as_slice())
     }
 
-    fn _directory(&self, path: &[&str]) -> Option<&Directory> {
+    fn directory_impl(&self, path: &[&str]) -> Option<&Directory> {
         match path {
             [] => Some(self),
             [name] => self.directories.get(*name),
             [name, rest @ ..] => self
                 .directories
                 .get(*name)
-                .and_then(|dir| dir._directory(rest)),
+                .and_then(|dir| dir.directory_impl(rest)),
         }
     }
 
-    fn _directory_mut(&mut self, path: &[&str]) -> Option<&mut Directory> {
+    fn directory_mut_impl(&mut self, path: &[&str]) -> Option<&mut Directory> {
         match path {
             [] => Some(self),
             [name] => self.directories.get_mut(*name),
             [name, rest @ ..] => self
                 .directories
                 .get_mut(*name)
-                .and_then(|dir| dir._directory_mut(rest)),
+                .and_then(|dir| dir.directory_mut_impl(rest)),
         }
     }
 
@@ -96,7 +96,7 @@ impl Directory {
             .split('/')
             .filter(|s| !s.is_empty())
             .collect::<alloc::vec::Vec<_>>();
-        self._file(path.as_slice())
+        self.file_impl(path.as_slice())
     }
 
     pub fn file_mut(&mut self, path: &str) -> Option<&mut File> {
@@ -104,25 +104,28 @@ impl Directory {
             .split('/')
             .filter(|s| !s.is_empty())
             .collect::<alloc::vec::Vec<_>>();
-        self._file_mut(path.as_slice())
+        self.file_mut_impl(path.as_slice())
     }
 
-    fn _file(&self, path: &[&str]) -> Option<&File> {
+    fn file_impl(&self, path: &[&str]) -> Option<&File> {
         match path {
             [] => None,
             [name] => self.files.get(*name),
-            [name, rest @ ..] => self.directories.get(*name).and_then(|dir| dir._file(rest)),
+            [name, rest @ ..] => self
+                .directories
+                .get(*name)
+                .and_then(|dir| dir.file_impl(rest)),
         }
     }
 
-    fn _file_mut(&mut self, path: &[&str]) -> Option<&mut File> {
+    fn file_mut_impl(&mut self, path: &[&str]) -> Option<&mut File> {
         match path {
             [] => None,
             [name] => self.files.get_mut(*name),
             [name, rest @ ..] => self
                 .directories
                 .get_mut(*name)
-                .and_then(|dir| dir._file_mut(rest)),
+                .and_then(|dir| dir.file_mut_impl(rest)),
         }
     }
 
@@ -136,14 +139,14 @@ impl Directory {
     pub fn create_directories(&mut self, path: &[&str]) -> &mut Directory {
         match path {
             [] => self,
-            [name] => self
+            &[name] => self
                 .directories
                 .entry(name.to_string())
                 .or_insert_with(Directory::empty),
             [name, rest @ ..] => {
                 let dir = self
                     .directories
-                    .entry(name.to_string())
+                    .entry((*name).to_string())
                     .or_insert_with(Directory::empty);
                 dir.create_directories(rest)
             }
@@ -155,45 +158,39 @@ impl Directory {
             .split('/')
             .filter(|s| !s.is_empty())
             .collect::<alloc::vec::Vec<_>>();
-        self._create_file(path.as_slice(), file)
+        self.create_file_(path.as_slice(), file)
     }
-    fn _create_file(&mut self, path: &[&str], file: File) -> &mut File {
+    fn create_file_(&mut self, path: &[&str], file: File) -> &mut File {
         match path {
             [] => panic!("Cannot create file at root"),
-            [name] => self.files.entry(name.to_string()).or_insert(file),
+            &[name] => self.files.entry(name.to_string()).or_insert(file),
             [name, rest @ ..] => {
                 let dir = self
                     .directories
-                    .entry(name.to_string())
+                    .entry((*name).to_string())
                     .or_insert_with(Directory::empty);
-                dir._create_file(rest, file)
+                dir.create_file_(rest, file)
             }
         }
     }
 
-    fn _print(&self, indent: usize) {
+    fn print_impl(&self, indent: usize) {
         for (name, file) in &self.files {
-            log::debug!("{:indent$}File '{name}'", "");
             match file {
                 File::Regular { contents } => {
-                    log::debug!(
-                        "{:indent$}\\Content Length: {}",
-                        "",
-                        contents.len(),
-                        indent = indent + 2
-                    );
+                    log::debug!("{:indent$}+ '{name}' ({} B)", "", contents.len());
                 }
                 File::Special { .. } => {
-                    log::debug!("{:indent$}\\Special File", "", indent = indent + 2);
+                    log::debug!("{:indent$}+ '{name}' (special)", "");
                 }
             }
         }
         for (name, dir) in &self.directories {
-            log::debug!("{:indent$}|-Directory: {}", "", name, indent = indent);
-            dir._print(indent + 2);
+            log::debug!("{:indent$}+ {name}/", "");
+            dir.print_impl(indent + 2);
         }
     }
     pub fn print(&self) {
-        self._print(0);
+        self.print_impl(0);
     }
 }

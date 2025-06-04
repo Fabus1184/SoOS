@@ -11,11 +11,12 @@ pub static TERM: spin::Lazy<Term> = spin::Lazy::new(|| {
         .get_response()
         .expect("Failed to get framebuffer!");
     let fb = fbr.framebuffers().next().expect("No framebuffers!");
+
     Term::new(fb)
 });
 
 pub struct Term {
-    framebuffer: limine::framebuffer::Framebuffer<'static>,
+    pub framebuffer: limine::framebuffer::Framebuffer<'static>,
     x: AtomicUsize,
     y: AtomicUsize,
 }

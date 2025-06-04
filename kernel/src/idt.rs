@@ -3,6 +3,7 @@ use pc_keyboard::{KeyboardLayout, ScancodeSet};
 use x86_64::{
     structures::{
         idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
+        paging::{Mapper, Translate},
         port::PortRead,
     },
     VirtAddr,
@@ -72,6 +73,8 @@ pub fn load_idt() {
             .set_privilege_level(x86_64::PrivilegeLevel::Ring3);
 
         IDT.load();
+
+        log::debug!("idt loaded");
     }
 }
 
@@ -345,13 +348,45 @@ extern "x86-interrupt" fn page_fault_handler(
 
         let process = process_lock.get();
         process.state = crate::process::State::Terminated(1);
-        log::warn!(
-            "Page fault in process {} ({:?}): {:#0x?}, caused by address {:#0x}",
-            process.pid(),
-            err,
-            stack_frame,
-            address
-        );
+
+        let mapping = process
+            .paging
+            .offset_page_table
+            .translate(VirtAddr::new(address.as_u64()));
+
+        match mapping {
+            x86_64::structures::paging::mapper::TranslateResult::Mapped {
+                frame,
+                offset,
+                flags,
+            } => {
+                log::warn!(
+                    "Page fault in process {} ({:?}): {:#0x?}, caused by mapped address {:#0x} with flags {:?}",
+                    process.pid(),
+                    err,
+                    stack_frame,
+                    frame.start_address() + offset,
+                    flags
+                );
+            }
+            x86_64::structures::paging::mapper::TranslateResult::NotMapped => log::warn!(
+                "Page fault in process {} ({:?}): {:#0x?}, caused by unmapped address {:#0x}",
+                process.pid(),
+                err,
+                stack_frame,
+                address
+            ),
+            x86_64::structures::paging::mapper::TranslateResult::InvalidFrameAddress(phys_addr) => {
+                log::warn!(
+                    "Page fault in process {} ({:?}): {:#0x?}, caused by invalid mapping address {:#0x} with physical address {:#0x}",
+                    process.pid(),
+                    err,
+                    stack_frame,
+                    address,
+                    phys_addr
+                );
+            }
+        }
 
         drop(process_lock);
 
