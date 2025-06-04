@@ -49,9 +49,7 @@ void _start() {
                 command[command_len] = '\0';
 
                 print("\n");
-                if (command_len > 0) {
-                    run_command(command);
-                }
+                run_command(command);
 
                 command_len = 0;
                 memset(command, 0, sizeof(command)); // Clear the command buffer
@@ -86,10 +84,16 @@ void command_ls(uint64_t argc, const char **argv);
 void command_fork(uint64_t argc, const char **argv);
 void command_clear(uint64_t argc, const char **argv);
 void command_cat(uint64_t argc, const char **argv);
+void command_lspci(uint64_t argc, const char **argv);
 
 const struct Command commands[] = {
-    {.name = "exit", .func = command_exit}, {.name = "help", .func = command_help},   {.name = "ls", .func = command_ls},
-    {.name = "fork", .func = command_fork}, {.name = "clear", .func = command_clear}, {.name = "cat", .func = command_cat},
+    {.name = "exit",  .func = command_exit },
+    {.name = "help",  .func = command_help },
+    {.name = "ls",    .func = command_ls   },
+    {.name = "fork",  .func = command_fork },
+    {.name = "clear", .func = command_clear},
+    {.name = "cat",   .func = command_cat  },
+    {.name = "lspci", .func = command_lspci},
 };
 
 void run_command(const char *cmd) {
@@ -123,6 +127,10 @@ void run_command(const char *cmd) {
         }
 
         start = end + 1; // Move to the next token
+    }
+
+    if (argc == 0) {
+        return;
     }
 
     for (uint64_t i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
@@ -237,6 +245,39 @@ void command_cat(uint64_t argc, const char **argv) {
         return;
     }
 
+    print(buffer);
+    print("\n");
+}
+
+void command_lspci(uint64_t argc, const char **argv) {
+    if (argc != 1) {
+        print(ANSI_FG_RED "Usage: lspci\n");
+        return;
+    }
+
+    int64_t fd = open("/proc/pci/devices");
+    if (fd < 0) {
+        print(ANSI_FG_RED "Error opening /proc/pci/devices\n");
+        return;
+    }
+
+    char buffer[4096] = {0};
+    uint64_t bytes_read = read(fd, buffer, sizeof(buffer) - 1);
+    if (bytes_read == 0) {
+        print(ANSI_FG_RED "Error reading /proc/pci/devices\n");
+        close(fd);
+        return;
+    }
+
+    buffer[bytes_read] = '\0'; // Null-terminate the string
+
+    int64_t ret = close(fd);
+    if (ret < 0) {
+        print(ANSI_FG_RED "Error closing /proc/pci/devices\n");
+        return;
+    }
+
+    print("PCI Devices:\n");
     print(buffer);
     print("\n");
 }

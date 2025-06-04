@@ -190,7 +190,7 @@ unsafe extern "C" fn _start() -> ! {
 
                     for dev in driver::pci::scan().expect("Failed to scan PCI devices!") {
                         let line = alloc::format!(
-                            "Found PCI device: bus {} device {} function {} class {:?}\n",
+                            "bus {} device {} function {} class {:?}\n",
                             dev.bus,
                             dev.device,
                             dev.function,
