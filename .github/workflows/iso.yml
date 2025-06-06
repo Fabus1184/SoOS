@@ -23,7 +23,8 @@ jobs:
                   rustup toolchain install nightly &&
                   wget https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz &&
                   tar xf *.tar.xz &&
-                  ln -s zig-*/zig /usr/local/bin/zig &&
+                  echo $PWD/zig* >> $GITHUB_PATH &&
+                  source $GITHUB_PATH &&
                   zig version
 
             - name: make
