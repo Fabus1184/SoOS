@@ -13,6 +13,8 @@ const banner =
     \\ /$$  \ $$| $$  | $$ /$$  \ $$| $$  | $$
     \\|  $$$$$$/|  $$$$$$/|  $$$$$$/| $$  | $$
     \\ \______/  \______/  \______/ |__/  |__/
+    \\
+    \\          - the SoOS shell -
     ++ ANSI_RESET;
 
 const Command = struct {
@@ -80,9 +82,64 @@ fn reset() void {
     soos.print("\x1b[2J\x1b[H{s}\n\n{s}_", .{ banner, prompt });
 }
 
+pub const std_options = std.Options{
+    .page_size_max = 4096,
+    .log_level = .debug,
+    .logFn = struct {
+        fn f(
+            comptime message_level: std.log.Level,
+            comptime _: @TypeOf(.enum_literal),
+            comptime format: []const u8,
+            args: anytype,
+        ) void {
+            const colors = switch (message_level) {
+                .debug => ANSI_FG_CYAN,
+                .info => ANSI_FG_GREEN,
+                .warn => ANSI_FG_YELLOW,
+                .err => ANSI_FG_RED,
+            };
+
+            soos.print("{s}[{s}] ", .{ colors, @tagName(message_level) });
+            soos.print(format, args);
+            soos.print("{s}\n", .{ANSI_RESET});
+        }
+    }.f,
+};
+
+const DummyMutex = struct {
+    pub fn lock(_: *@This()) void {}
+    pub fn unlock(_: *@This()) void {}
+};
+
+pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
+    std.log.err("{s}panic: {s}\n", .{ ANSI_FG_RED, message });
+    soos.syscalls.exit(1);
+}
+
 export fn _start() void {
     var commandBuffer: [1024]u8 = undefined;
     var commandLength: u64 = 0;
+
+    {
+        const pageAllocator = soos.pageAllocator();
+
+        var heap = std.heap.ArenaAllocator.init(pageAllocator);
+        var allocator = heap.allocator();
+
+        const testPtr = allocator.alloc(u8, 100) catch @panic("Failed to allocate memory");
+        defer allocator.free(testPtr);
+
+        for (0..100) |i| {
+            testPtr[i] = 0;
+        }
+
+        const testPtr2 = allocator.alloc(u8, 1000) catch @panic("Failed to allocate memory");
+        defer allocator.free(testPtr2);
+
+        for (0..1000) |i| {
+            testPtr2[i] = 0;
+        }
+    }
 
     reset();
 

@@ -4,6 +4,9 @@ use alloc::{
 };
 use core::fmt::Write as _;
 use log::trace;
+use x86_64::structures::paging::{
+    FrameAllocator, FrameDeallocator as _, Mapper, Page, PageTableFlags, Size4KiB, Translate,
+};
 
 use crate::process;
 
@@ -219,6 +222,79 @@ fn close(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
     }
 }
 
+/// map a new page into the process and return the address in rax
+/// rbx contains the address to map to or 0
+/// return the address in rax, length in rbx
+fn mmap(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
+    const START_ADDRESS: u64 = 0x6942_0000_0000;
+
+    let process = process_lock.get();
+
+    let address = if process.registers.rbx == 0 {
+        process
+            .mapped_pages
+            .iter()
+            .filter(|&(page, _)| page.start_address().as_u64() >= START_ADDRESS)
+            .max_by_key(|&(page, _)| page.start_address().as_u64())
+            .map_or(START_ADDRESS, |(page, _)| {
+                page.start_address().as_u64() + 4096
+            })
+    } else {
+        process.registers.rbx
+    };
+    let page = Page::containing_address(x86_64::VirtAddr::new(address));
+
+    let mut kernel_paging = crate::kernel_paging();
+    let phys_frame = kernel_paging
+        .frame_allocator
+        .allocate_frame()
+        .expect("Failed to allocate frame");
+
+    let frame_virt_addr =
+        kernel_paging.page_table.phys_offset() + phys_frame.start_address().as_u64();
+    (unsafe { *frame_virt_addr.as_mut_ptr::<[u8; 4096]>() }).fill(0);
+
+    let flags = PageTableFlags::PRESENT
+        | PageTableFlags::USER_ACCESSIBLE
+        | PageTableFlags::WRITABLE
+        | PageTableFlags::NO_EXECUTE;
+
+    unsafe {
+        process
+            .paging
+            .page_table
+            .map_to(page, phys_frame, flags, &mut kernel_paging.frame_allocator)
+            .expect("Failed to map page")
+            .flush();
+    }
+
+    process.mapped_pages.push((page, flags));
+
+    process.registers.rax = address;
+    process.registers.rbx = 4096;
+}
+
+/// Unmap the page at the address in rbx
+fn munmap(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
+    let process = process_lock.get();
+
+    let address = process.registers.rbx;
+    let page = Page::<Size4KiB>::containing_address(x86_64::VirtAddr::new(address));
+
+    match process.paging.page_table.unmap(page) {
+        Ok((frame, flush)) => {
+            flush.flush();
+
+            let mut kernel_paging = crate::kernel_paging();
+            unsafe { kernel_paging.frame_allocator.deallocate_frame(frame) };
+        }
+        Err(e) => {
+            log::warn!("Failed to unmap page at {address:#x}: {e:?}");
+            process.state = crate::process::State::Terminated(2);
+        }
+    }
+}
+
 /// Handle system calls
 /// return true if the process still exists, false if it was terminated
 pub fn handle_syscall(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
@@ -237,6 +313,8 @@ pub fn handle_syscall(process_lock: &mut crate::process::IndexedProcessGuard<'_>
         5 => fork(process_lock),
         6 => open(process_lock),
         7 => close(process_lock),
+        8 => mmap(process_lock),
+        9 => munmap(process_lock),
         n => panic!("unknown syscall: {n:#x}"),
     }
 }

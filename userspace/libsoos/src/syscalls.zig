@@ -7,6 +7,8 @@ const syscall = enum(u64) {
     fork = 5,
     open = 6,
     close = 7,
+    mmap = 8,
+    munmap = 9,
 };
 
 pub fn print(str: []const u8) void {
@@ -106,4 +108,31 @@ pub fn close(fd: u64) u64 {
     );
 
     return result;
+}
+
+pub fn mmap() ?struct { ptr: [*]u8, size: u64 } {
+    var ptr: u64 = 0;
+    var size: u64 = 0;
+
+    asm volatile ("int $0x80"
+        : [ptr] "={rax}" (ptr),
+          [size] "={rbx}" (size),
+        : [i] "{rax}" (@intFromEnum(syscall.mmap)),
+        : "rax", "rbx"
+    );
+
+    if (ptr != 0) {
+        return .{ .ptr = @ptrFromInt(ptr), .size = size };
+    } else {
+        return null;
+    }
+}
+
+pub fn munmap(ptr: *anyopaque) void {
+    asm volatile ("int $0x80"
+        : // no output operands
+        : [i] "{rax}" (@intFromEnum(syscall.munmap)),
+          [ptr] "{rbx}" (ptr),
+        : "rax", "rbx"
+    );
 }

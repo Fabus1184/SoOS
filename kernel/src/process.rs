@@ -41,7 +41,7 @@ pub struct Process {
     pub rip: u64,
     pub registers: crate::idt::GPRegisters,
     pub stdin: alloc::collections::VecDeque<u8>,
-    mapped_pages: Vec<(
+    pub mapped_pages: Vec<(
         x86_64::structures::paging::Page,
         x86_64::structures::paging::PageTableFlags,
     )>,
