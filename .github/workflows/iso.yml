@@ -17,7 +17,7 @@ jobs:
             - uses: actions/checkout@v4
 
             - name: install dependencies
-              run: sudo apt install libisoburn
+              run: sudo apt install libisoburn1t64
 
             - name: make
               run: make
