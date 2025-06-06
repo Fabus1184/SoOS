@@ -23,8 +23,8 @@ jobs:
                   wget https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz &&
                   tar xf *.tar.xz &&
                   echo $PWD/zig*/ >> $GITHUB_PATH &&
-                  rustup toolchain install nightly &&
-                  rustup target add x86_64-unknown-none
+                  rustup target add x86_64-unknown-none &&
+                  rustup toolchain --target x86_64-unknown-none install nightly
 
             - name: make
               run: make build/SoOS.iso
