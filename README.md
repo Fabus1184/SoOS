@@ -14,21 +14,16 @@ x86_64 operating system written in Rust.
 - [x] ELF64 binary loader
 - [x] Basic syscall functionality
 - [x] Fancy logging with [`log`](https://crates.io/crates/log)
+- [x] Basic Preemptive multitasking & Process management
+- [x] Basic Virtual File System
 
 ## Work in progress
-- [ ] Preemptive multitasking & Process management
-
-## Roadmap
 - [ ] Fix bugs & undefined behaviors that I'm sure are lurking somewhere
-- [ ] Stop disabling interrupts at all
-
-### Kernel
-- [ ] Virtual File System
-- [ ] Process Management
+- [ ] IRQ workers, stop disabling interrupts for long periods
 
 ### Userland
+- [x] Shell
 - [ ] `init` process
-- [ ] Shell
 - [ ] Implement libc
 - [ ] Dynamic linking
 
@@ -39,15 +34,15 @@ x86_64 operating system written in Rust.
 - [ ] File System Drivers
 - [ ] Networking
 - [ ] ACPI
-- [ ] PCI (discovering devices somewhat working)
+- [ ] PCI (discovering devices working a little bit)
 - [ ] USB
 
 ### Meta
 - [ ] Revise structure / modules
-- [ ] Policy for loglevels
+- [ ] Real logging
 - [ ] CI
 - [ ] More careful / isolated use of `unsafe`
-- [ ] GCC real cross-compilation
+- [ ] real cross-compilation
 
 ## "inspirational" screenshots
 
