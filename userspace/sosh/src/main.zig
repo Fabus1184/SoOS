@@ -33,50 +33,58 @@ const ANSI_FG_WHITE = "\x1b[37m";
 
 const prompt = ANSI_FG_GREEN ++ "sosh> " ++ ANSI_RESET;
 
-const commands: []const Command = &[_]Command{
-    .{ .name = "help", .run = struct {
-        fn help(_: u32, _: []const []const u8) void {
-            soos.print("available commands:\n", .{});
-            for (commands) |cmd| {
-                soos.print("* {s}{s}{s}\n", .{ ANSI_FG_MAGENTA, cmd.name, ANSI_RESET });
+const commands: []const Command = &[_]Command{ .{ .name = "help", .run = struct {
+    fn help(_: u32, _: []const []const u8) void {
+        soos.print("available commands:\n", .{});
+        for (commands) |cmd| {
+            soos.print("* {s}{s}{s}\n", .{ ANSI_FG_MAGENTA, cmd.name, ANSI_RESET });
+        }
+    }
+}.help }, .{ .name = "clear", .run = struct {
+    fn clear(_: u32, _: []const []const u8) void {
+        reset();
+    }
+}.clear }, .{ .name = "exit", .run = struct {
+    fn exit(_: u32, _: []const []const u8) void {
+        soos.syscalls.exit(0);
+    }
+}.exit }, .{
+    .name = "ls",
+    .run = struct {
+        fn ls(argc: u32, argv: []const []const u8) void {
+            if (argc != 2) {
+                soos.print("usage: ls <directory>\n", .{});
+                return;
             }
-        }
-    }.help },
-    .{ .name = "clear", .run = struct {
-        fn clear(_: u32, _: []const []const u8) void {
-            reset();
-        }
-    }.clear },
-    .{ .name = "exit", .run = struct {
-        fn exit(_: u32, _: []const []const u8) void {
-            soos.syscalls.exit(0);
-        }
-    }.exit },
-    .{
-        .name = "ls",
-        .run = struct {
-            fn ls(argc: u32, argv: []const []const u8) void {
-                if (argc != 2) {
-                    soos.print("usage: ls <directory>\n", .{});
+            var i: u64 = 0;
+            while (true) {
+                var buffer: [512]u8 = undefined;
+                const n = soos.syscalls.listdir(argv[1], i, &buffer);
+                if (n == 0) {
+                    if (i == 0) {
+                        soos.print("Error: Failed to list directory '{s}'\n", .{argv[1]});
+                    }
                     return;
                 }
-                var i: u64 = 0;
-                while (true) {
-                    var buffer: [512]u8 = undefined;
-                    const n = soos.syscalls.listdir(argv[1], i, &buffer);
-                    if (n == 0) {
-                        if (i == 0) {
-                            soos.print("Error: Failed to list directory '{s}'\n", .{argv[1]});
-                        }
-                        return;
-                    }
-                    soos.print("{s}\n", .{buffer[0..n]});
-                    i += 1;
-                }
+                soos.print("{s}\n", .{buffer[0..n]});
+                i += 1;
             }
-        }.ls,
-    },
-};
+        }
+    }.ls,
+}, .{
+    .name = "fork",
+    .run = struct {
+        fn fork(_: u32, _: []const []const u8) void {
+            const pid = soos.syscalls.fork();
+            if (pid == 0) {
+                soos.print("Hello from the child process!\n", .{});
+                soos.syscalls.exit(0);
+            } else {
+                soos.print("Forked child process with PID: {d}\n", .{pid});
+            }
+        }
+    }.fork,
+} };
 
 fn reset() void {
     soos.print("\x1b[2J\x1b[H{s}\n\n{s}_", .{ banner, prompt });
