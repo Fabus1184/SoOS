@@ -1,3 +1,5 @@
+use x86_64::structures::paging::PhysFrame;
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 #[repr(u64)]
 #[allow(dead_code)]
@@ -23,12 +25,19 @@ pub struct MemmapEntry {
 pub struct SoosMemmap([Option<MemmapEntry>; 128]);
 
 impl SoosMemmap {
-    pub fn iter_usable_addresses(&self) -> impl Iterator<Item = u64> + '_ {
+    pub fn iter_usable_frames(&self) -> impl Iterator<Item = PhysFrame> + '_ {
         self.0
             .iter()
             .flatten()
-            .filter(|e| e.type_ == MemmapEntryType::Usable)
-            .flat_map(|e| e.base..e.base + e.len)
+            .filter(|e| {
+                e.type_ == MemmapEntryType::Usable || e.type_ == MemmapEntryType::KernelAndModules
+            })
+            .flat_map(|e| {
+                assert!(e.base % 4096 == 0);
+                (0..e.len / 4096).map(move |i| {
+                    PhysFrame::containing_address(x86_64::PhysAddr::new(e.base + i * 4096))
+                })
+            })
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &MemmapEntry> {

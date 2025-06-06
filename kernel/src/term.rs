@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicUsize;
 
 use limine::request::FramebufferRequest;
 
-use crate::font::{self, FONT_HEIGHT, FONT_WIDTH};
+use crate::font::{self, FONT, FONT_HEIGHT, FONT_WIDTH};
 
 pub static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
 
@@ -16,26 +16,53 @@ pub static TERM: spin::Lazy<Term> = spin::Lazy::new(|| {
 });
 
 pub struct Term {
-    pub framebuffer: limine::framebuffer::Framebuffer<'static>,
+    pub framebuffer: Framebuffer,
     x: AtomicUsize,
     y: AtomicUsize,
 }
 
-struct Performer<'a> {
+#[derive(Clone, Copy)]
+pub struct Framebuffer {
+    pub width: u64,
+    pub height: u64,
+    pub ptr: *mut u32,
+}
+
+unsafe impl Sync for Framebuffer {}
+unsafe impl Send for Framebuffer {}
+
+struct Performer {
     x: usize,
     y: usize,
     fg: u32,
     bg: u32,
-    framebuffer: &'a limine::framebuffer::Framebuffer<'static>,
+    framebuffer: Framebuffer,
 }
 
 impl Term {
     pub fn new(framebuffer: limine::framebuffer::Framebuffer<'static>) -> Term {
         Term {
-            framebuffer,
+            framebuffer: Framebuffer {
+                width: framebuffer.width(),
+                height: framebuffer.height(),
+                ptr: framebuffer.addr().cast::<u32>(),
+            },
             x: AtomicUsize::new(0),
             y: AtomicUsize::new(0),
         }
+    }
+
+    pub fn reset(&self) {
+        let performer = Performer {
+            x: 0,
+            y: 0,
+            fg: 0xFFFF_FFFF, // White
+            bg: 0xFF00_0000, // Black
+            framebuffer: self.framebuffer,
+        };
+        performer.clear();
+        self.x.store(0, core::sync::atomic::Ordering::Relaxed);
+        self.y.store(0, core::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn writer(&self) -> impl core::fmt::Write + '_ {
@@ -44,9 +71,9 @@ impl Term {
             performer: Performer {
                 x: self.x.load(core::sync::atomic::Ordering::Relaxed),
                 y: self.y.load(core::sync::atomic::Ordering::Relaxed),
-                fg: 0xFFFFFFFF,
-                bg: 0xFF000000,
-                framebuffer: &self.framebuffer,
+                fg: 0xFFFF_FFFF,
+                bg: 0xFF00_0000,
+                framebuffer: self.framebuffer,
             },
         }
     }
@@ -54,7 +81,7 @@ impl Term {
 
 struct Writer<'a> {
     term: &'a Term,
-    performer: Performer<'a>,
+    performer: Performer,
 }
 
 impl Drop for Writer<'_> {
@@ -79,18 +106,28 @@ impl core::fmt::Write for Writer<'_> {
     }
 }
 
-impl Performer<'_> {
+impl Performer {
     fn blit(&self, x: u64, y: u64, color: u32) {
+        let ptr = self
+            .framebuffer
+            .ptr
+            .wrapping_offset((y * self.framebuffer.width + x) as isize);
+        assert!(
+            (ptr as usize)
+                < self.framebuffer.ptr as usize
+                    + (self.framebuffer.width * self.framebuffer.height * 4) as usize,
+            "framebuffer {:#0x} out of bounds at ({x}, {y})",
+            ptr as usize
+        );
+
         unsafe {
-            (self.framebuffer.addr() as *mut u32)
-                .wrapping_offset((y * self.framebuffer.width() + x) as isize)
-                .write_volatile(color);
+            ptr.write_volatile(color);
         }
     }
 
     fn clear(&self) {
-        for x in 0..self.framebuffer.width() {
-            for y in 0..self.framebuffer.height() {
+        for x in 0..self.framebuffer.width {
+            for y in 0..self.framebuffer.height {
                 self.blit(x, y, self.bg);
             }
         }
@@ -98,6 +135,17 @@ impl Performer<'_> {
 
     fn print_char(&mut self, c: char) {
         let font_scale: u64 = 2;
+
+        if self.x >= self.framebuffer.width as usize / FONT_WIDTH * font_scale as usize {
+            self.x = 0;
+            self.y += 1;
+        }
+
+        if self.y >= self.framebuffer.height as usize / FONT_HEIGHT * font_scale as usize {
+            // If no lines remain, scroll the screen
+            self.scroll();
+            self.y = self.y.saturating_sub(2);
+        }
 
         if c == '\0' {
             return;
@@ -132,32 +180,33 @@ impl Performer<'_> {
         }
 
         self.x += 1;
-
-        if self.x >= self.framebuffer.width() as usize / FONT_WIDTH * font_scale as usize {
-            self.x = 0;
-            self.y += 1;
-        }
-
-        if self.y >= self.framebuffer.height() as usize / FONT_HEIGHT * font_scale as usize {
-            self.scroll();
-            self.y = self.y.saturating_sub(1);
-        }
     }
 
     fn scroll(&self) {
-        let fb_ptr = self.framebuffer.addr() as *mut u32;
         unsafe {
             core::ptr::copy(
-                fb_ptr
-                    .wrapping_offset((FONT_HEIGHT as u64 * self.framebuffer.width() / 2) as isize),
-                fb_ptr,
-                (self.framebuffer.width() * self.framebuffer.height()) as usize,
+                self.framebuffer
+                    .ptr
+                    .add(self.framebuffer.width as usize * FONT_HEIGHT),
+                self.framebuffer.ptr,
+                (self.framebuffer.height as usize - FONT_HEIGHT) * self.framebuffer.width as usize,
             );
+        }
+
+        // Clear the last line
+        for x in 0..self.framebuffer.width {
+            for y in 0..FONT_HEIGHT {
+                self.blit(
+                    x,
+                    self.framebuffer.height - FONT_HEIGHT as u64 + y as u64,
+                    self.bg,
+                );
+            }
         }
     }
 }
 
-impl vte::Perform for Performer<'_> {
+impl vte::Perform for Performer {
     fn print(&mut self, c: char) {
         self.print_char(c);
     }
@@ -204,32 +253,32 @@ impl vte::Perform for Performer<'_> {
             }
             // Text attributes
             ('m', [[0]]) => {
-                self.fg = 0xFFFFFFFF; // Reset foreground color to white
-                self.bg = 0xFF000000; // Reset background color to black
+                self.fg = 0xFFFF_FFFF; // Reset foreground color to white
+                self.bg = 0xFF00_0000; // Reset background color to black
             }
             ('m', &[&[fg]]) if (30..=37).contains(&fg) => {
                 self.fg = match fg {
-                    30 => 0xFF000000, // Black
-                    31 => 0xFFFF0000, // Red
-                    32 => 0xFF00FF00, // Green
-                    33 => 0xFFFFFF00, // Yellow
-                    34 => 0xFF0000FF, // Blue
-                    35 => 0xFFFF00FF, // Magenta
-                    36 => 0xFF00FFFF, // Cyan
-                    37 => 0xFFFFFFFF, // White
+                    30 => 0xFF00_0000, // Black
+                    31 => 0xFFFF_0000, // Red
+                    32 => 0xFF00_FF00, // Green
+                    33 => 0xFFFF_FF00, // Yellow
+                    34 => 0xFF00_00FF, // Blue
+                    35 => 0xFFFF_00FF, // Magenta
+                    36 => 0xFF00_FFFF, // Cyan
+                    37 => 0xFFFF_FFFF, // White
                     _ => unreachable!(),
                 };
             }
             ('m', &[&[bg]]) if (40..=47).contains(&bg) => {
                 self.bg = match bg {
-                    40 => 0xFF000000, // Black
-                    41 => 0xFFFF0000, // Red
-                    42 => 0xFF00FF00, // Green
-                    43 => 0xFFFFFF00, // Yellow
-                    44 => 0xFF0000FF, // Blue
-                    45 => 0xFFFF00FF, // Magenta
-                    46 => 0xFF00FFFF, // Cyan
-                    47 => 0xFFFFFFFF, // White
+                    40 => 0xFF00_0000, // Black
+                    41 => 0xFFFF_0000, // Red
+                    42 => 0xFF00_FF00, // Green
+                    43 => 0xFFFF_FF00, // Yellow
+                    44 => 0xFF00_00FF, // Blue
+                    45 => 0xFFFF_00FF, // Magenta
+                    46 => 0xFF00_FFFF, // Cyan
+                    47 => 0xFFFF_FFFF, // White
                     _ => unreachable!(),
                 };
             }

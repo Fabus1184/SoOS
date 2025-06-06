@@ -1,23 +1,23 @@
 use elf_rs::{Elf, ElfFile, ProgramHeaderFlags, ProgramType};
 use log::info;
 use x86_64::{
-    structures::paging::{FrameAllocator, Mapper, Page, PageSize, PageTableFlags, Size4KiB},
+    structures::paging::{
+        FrameAllocator, FrameDeallocator, Mapper, Page, PageSize, PageTableFlags, Size4KiB,
+    },
     VirtAddr,
 };
 
-use crate::kernel::paging::SoosPaging;
+use crate::kernel::paging::{KernelPaging, UserspacePaging};
 
 pub fn load(
-    process_paging: &mut SoosPaging,
-    frame_allocator: &mut impl FrameAllocator<Size4KiB>,
+    process_paging: &mut UserspacePaging,
+    kernel_paging: &mut KernelPaging,
     bytes: &[u8],
 ) -> (
     VirtAddr,
     VirtAddr,
     alloc::vec::Vec<(x86_64::structures::paging::Page, PageTableFlags)>,
 ) {
-    process_paging.load();
-
     let elf = Elf::from_bytes(bytes).expect("Failed to parse ELF!");
     match elf.elf_header().elftype() {
         elf_rs::ElfType::ET_EXEC => {}
@@ -43,7 +43,7 @@ pub fn load(
         }
 
         info!(
-            "mapping pages [{:#0x} - {:#0x}] with flags {:?}",
+            "mapping code pages [{:#0x} - {:#0x}] with flags {:?}",
             start_page.start_address(),
             end_page.start_address(),
             flags
@@ -57,18 +57,19 @@ pub fn load(
             }
             pages.push((page, flags));
 
-            let frame = frame_allocator
+            let frame = kernel_paging
+                .frame_allocator
                 .allocate_frame()
                 .expect("Failed to allocate frame!");
 
             unsafe {
                 process_paging
-                    .offset_page_table
+                    .page_table
                     .map_to(
                         page,
                         frame,
                         PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
-                        frame_allocator,
+                        &mut kernel_paging.frame_allocator,
                     )
                     .unwrap_or_else(|e| panic!("Failed to map page {:#?}: {:?}", page, e))
                     .flush();
@@ -76,6 +77,8 @@ pub fn load(
         }
 
         unsafe {
+            process_paging.load();
+
             // copy data
             core::ptr::copy::<u8>(
                 bytes.as_ptr().add(ph.offset() as usize),
@@ -86,14 +89,22 @@ pub fn load(
             // zero out the rest of the page
             let remaining_size = ph.memsz() as usize - ph.filesz() as usize;
             core::ptr::write_bytes((ph.vaddr() + ph.filesz()) as *mut u8, 0, remaining_size);
+
+            kernel_paging.load();
         }
 
         // remap the page to the correct flags
         for page in Page::range_inclusive(start_page, end_page) {
             unsafe {
+                let (frame, flush) = process_paging
+                    .page_table
+                    .unmap(page)
+                    .expect("Failed to unmap page!");
+                flush.flush();
+
                 process_paging
-                    .offset_page_table
-                    .update_flags(page, flags)
+                    .page_table
+                    .map_to(page, frame, flags, &mut kernel_paging.frame_allocator)
                     .expect("Failed to remap page!")
                     .flush();
             }
@@ -103,19 +114,29 @@ pub fn load(
     // create stack
     let stack_size_pages = 10;
     let stack_address = VirtAddr::new(0x0000_1000_0000_0000);
+    let flags = PageTableFlags::PRESENT
+        | PageTableFlags::WRITABLE
+        | PageTableFlags::USER_ACCESSIBLE
+        | PageTableFlags::NO_EXECUTE;
+    info!(
+        "mapping stack pages [{:#0x} - {:#0x}] with flags {:?}",
+        stack_address,
+        stack_address + stack_size_pages * Size4KiB::SIZE,
+        flags
+    );
     for i in 0..stack_size_pages {
         let page = Page::containing_address(stack_address + i * Size4KiB::SIZE);
-        let frame = frame_allocator
+        let frame = kernel_paging
+            .frame_allocator
             .allocate_frame()
             .expect("Failed to allocate frame!");
-        let flags = PageTableFlags::PRESENT
-            | PageTableFlags::WRITABLE
-            | PageTableFlags::USER_ACCESSIBLE
-            | PageTableFlags::NO_EXECUTE;
+
+        log::debug!("Mapping stack page {page:#?} to frame {frame:?}");
+
         unsafe {
             process_paging
-                .offset_page_table
-                .map_to(page, frame, flags, frame_allocator)
+                .page_table
+                .map_to(page, frame, flags, &mut kernel_paging.frame_allocator)
                 .expect("Failed to map page!")
                 .flush();
         }
@@ -123,9 +144,7 @@ pub fn load(
         pages.push((page, flags));
     }
 
-    crate::KERNEL_PAGING.lock().load();
-
-    let stack_pointer = stack_address + stack_size_pages * Size4KiB::SIZE - 0x100_u64;
+    let stack_pointer = stack_address + stack_size_pages * Size4KiB::SIZE;
 
     (VirtAddr::new(elf.entry_point()), stack_pointer, pages)
 }

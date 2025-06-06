@@ -7,13 +7,12 @@
         {
             "type": "gdb",
             "request": "attach",
-            "name": "Attach to qemu",
+            "name": "Attach to gdbserver",
             "target": "localhost:1234",
             "remote": true,
             "cwd": "${workspaceRoot}",
-            "autorun": [
-                "add-symbol-file userspace/build/sosh 0x123400001000",
-            ]
+            "gdbpath": "gdb",
+            "autorun": []
         }
     ]
 }

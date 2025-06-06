@@ -36,7 +36,7 @@ use x86_64::{
     registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
     structures::{
         gdt::{Descriptor, GlobalDescriptorTable},
-        paging::mapper::CleanUp,
+        paging::{OffsetPageTable, Page},
         tss::TaskStateSegment,
     },
     VirtAddr,
@@ -44,7 +44,7 @@ use x86_64::{
 
 use crate::{
     driver::i8253,
-    kernel::paging::{self, SoosFrameAllocator, SoosPaging},
+    kernel::paging::{self, KernelPaging},
     stuff::memmap::SoosMemmap,
     term::TERM,
 };
@@ -56,30 +56,49 @@ static PAGING_MODE_REQUEST: PagingModeRequest =
 
 static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
 
-static KERNEL_PAGING: spin::Lazy<spin::Mutex<SoosPaging>> = spin::Lazy::new(|| {
-    spin::Mutex::new(SoosPaging::offset_page_table(0, unsafe {
-        core::mem::MaybeUninit::zeroed().assume_init()
-    }))
-});
-
 static FILE_SYSTEM: spin::Lazy<spin::Mutex<vfs::Directory>> =
     spin::Lazy::new(|| spin::Mutex::new(vfs::Directory::new(&["home", "bin"])));
 
+static KERNEL_MEMORY_START_ADDR: spin::Lazy<u64> = spin::Lazy::new(|| {
+    extern "C" {
+        static KERNEL_MEMORY_START: u8;
+    }
+    &raw const KERNEL_MEMORY_START as u64
+});
+static KERNEL_MEMORY_END_ADDR: spin::Lazy<u64> = spin::Lazy::new(|| {
+    extern "C" {
+        static KERNEL_MEMORY_END: u8;
+    }
+    &raw const KERNEL_MEMORY_END as u64
+});
+
+const KERNEL_STACK_SIZE: usize = 4192 * 1000;
 static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
-const KERNEL_STACK_SIZE: usize = 4192 * 100;
 const KERNEL_STACK_POINTER: fn() -> u64 =
-    || unsafe { KERNEL_STACK.as_mut_ptr() as u64 + KERNEL_STACK.len() as u64 - 1 };
+    || unsafe { (KERNEL_STACK.as_mut_ptr() as u64 + KERNEL_STACK.len() as u64 - 0xF) & !0xF };
 
-extern "C" {
-    static KERNEL_MEMORY_START: u8;
-    static KERNEL_MEMORY_END: u8;
+static KERNEL_PAGING: spin::Once<spin::Mutex<KernelPaging>> = spin::Once::new();
+
+fn kernel_paging() -> spin::MutexGuard<'static, KernelPaging> {
+    KERNEL_PAGING
+        .get()
+        .expect("Kernel paging not initialized!")
+        .try_lock()
+        .expect("Failed to lock kernel paging!")
 }
-
-const KERNEL_HEAP_SIZE: usize = 0x1_000_000; // 16 MiB
-static mut KERNEL_HEAP: [u8; KERNEL_HEAP_SIZE] = [0; KERNEL_HEAP_SIZE];
 
 #[no_mangle]
 unsafe extern "C" fn _start() -> ! {
+    asm!("
+        mov rsp, {0}
+        jmp main
+        ",
+        in(reg) KERNEL_STACK_POINTER(), options(noreturn)
+    );
+}
+
+#[no_mangle]
+unsafe extern "C" fn main() -> ! {
     kernel::logger::init(LevelFilter::Debug);
 
     static mut TSS: TaskStateSegment = TaskStateSegment::new();
@@ -112,8 +131,8 @@ unsafe extern "C" fn _start() -> ! {
 
     log::debug!(
         "kernel memory {:#x} - {:#x}",
-        (&raw const KERNEL_MEMORY_START) as u64,
-        (&raw const KERNEL_MEMORY_END) as u64
+        *KERNEL_MEMORY_START_ADDR,
+        *KERNEL_MEMORY_END_ADDR
     );
 
     let rip = x86_64::registers::read_rip();
@@ -139,9 +158,9 @@ unsafe extern "C" fn _start() -> ! {
         let fb = &term::TERM.framebuffer;
         log::debug!(
             "framebuffer {}x{} at {:#x}",
-            fb.width(),
-            fb.height(),
-            fb.addr() as u64
+            fb.width,
+            fb.height,
+            fb.ptr as u64
         );
     }
 
@@ -150,62 +169,60 @@ unsafe extern "C" fn _start() -> ! {
     let current_page_table = paging::current_page_table();
     log::debug!("Current page table: {:#x}", current_page_table as u64);
 
-    // copy page table
-
-    {
-        static mut KERNEL_PAGE_TABLE: x86_64::structures::paging::PageTable =
-            x86_64::structures::paging::PageTable::new();
-
-        log::debug!(
-            "Copying current page table at {:#x} to kernel page table at {:#x}",
-            current_page_table as u64,
-            &raw const KERNEL_PAGE_TABLE as u64
-        );
-
-        *KERNEL_PAGING.lock() =
-            SoosPaging::offset_page_table(hhdm.offset(), &mut KERNEL_PAGE_TABLE);
-    }
-
-    {
-        let mut paging = KERNEL_PAGING.lock();
-
-        paging.load();
-
-        log::debug!("kernel paging loaded");
-
-        // clean up lower half memory
-        cleanup(paging.offset_page_table.level_4_table_mut());
-
-        x86_64::instructions::tlb::flush_all();
-    }
-
     let limine_memmap = MEMMAP_REQUEST
         .get_response()
         .expect("Failed to get memmap!");
     let memmap = SoosMemmap::from(limine_memmap);
-    SoosFrameAllocator::init_empty(&memmap);
     log::info!("memory map");
     for entry in memmap.iter() {
         log::info!(
-            "  {:#x} {:#} - {:?}",
+            "{:#12x} {:>#12} - {:?}",
             entry.base,
             byte_unit::Byte::from_u64(entry.len),
             entry.type_
         );
     }
 
-    {
-        KERNEL_PAGING
-            .lock()
-            .offset_page_table
-            .clean_up(kernel::paging::SOOS_FRAME_ALLOCATOR.as_mut().unwrap());
-    }
-
-    // no allocation before this point!
-    kernel::allocator::init_kernel_heap(KERNEL_HEAP.as_mut_ptr(), KERNEL_HEAP_SIZE);
-
     idt::load_idt();
     pic::init();
+
+    let offset = hhdm.offset();
+
+    let mut current_page_table =
+        OffsetPageTable::new(&mut *current_page_table, VirtAddr::new(offset));
+
+    KERNEL_PAGING.call_once(|| {
+        spin::Mutex::new(KernelPaging::make_kernel_paging(
+            &memmap,
+            &mut current_page_table,
+            Page::range_inclusive(
+                Page::containing_address(VirtAddr::new(*KERNEL_MEMORY_START_ADDR)),
+                Page::containing_address(VirtAddr::new(*KERNEL_MEMORY_END_ADDR)),
+            )
+            .chain(Page::range(
+                Page::containing_address(VirtAddr::new(term::TERM.framebuffer.ptr as u64)),
+                Page::containing_address(VirtAddr::new(
+                    term::TERM.framebuffer.ptr as u64
+                        + term::TERM.framebuffer.width * term::TERM.framebuffer.height * 4,
+                )),
+            ))
+            .chain(Page::range(
+                Page::containing_address(VirtAddr::new(
+                    kernel::paging::KERNEL_FRAME_MAPPING_ADDRESS,
+                )),
+                Page::containing_address(VirtAddr::new(
+                    kernel::paging::KERNEL_FRAME_MAPPING_ADDRESS + (1 << 20) * 0x1000,
+                )),
+            )),
+        ))
+    });
+
+    // no allocation before this point!
+    {
+        const KERNEL_HEAP_SIZE: usize = 0x1_000_000; // 16 MiB
+        static mut KERNEL_HEAP: [u8; KERNEL_HEAP_SIZE] = [0; KERNEL_HEAP_SIZE];
+        kernel::allocator::init_kernel_heap(KERNEL_HEAP.as_mut_ptr(), KERNEL_HEAP_SIZE);
+    }
 
     i8253::TIMER0.init(
         10,
@@ -229,7 +246,6 @@ unsafe extern "C" fn _start() -> ! {
         process::PROCESSES
             .lock()
             .push_back(process::Process::user_from_elf(
-                hhdm.offset(),
                 ucs,
                 uds,
                 0x202,
@@ -274,7 +290,7 @@ unsafe extern "C" fn _start() -> ! {
         fs.print();
     }
 
-    //loop {}
+    log::info!("kernel initialization complete, starting scheduler");
 
     process::try_schedule().unwrap_or_else(|| {
         panic!("No process ready to run!");
@@ -283,77 +299,4 @@ unsafe extern "C" fn _start() -> ! {
 
 extern "C" {
     pub fn do_iret(cs: u64, ds: u64, flags: u64, rip: u64, regs: *const idt::GPRegisters) -> !;
-}
-
-fn cleanup(page_table: &mut x86_64::structures::paging::PageTable) {
-    for (l4_index, l4_entry) in page_table.iter_mut().enumerate().take(256) {
-        if l4_entry
-            .flags()
-            .contains(x86_64::structures::paging::PageTableFlags::PRESENT)
-        {
-            let l3_table = l4_entry.addr().as_u64() as *mut x86_64::structures::paging::PageTable;
-            let l3_table = unsafe { &mut *l3_table };
-            for (l3_index, l3_entry) in l3_table.iter_mut().enumerate() {
-                if l3_entry
-                    .flags()
-                    .contains(x86_64::structures::paging::PageTableFlags::HUGE_PAGE)
-                {
-                    huge_pages
-                        .push(l3_entry)
-                        .expect("Failed to push huge page to vector");
-                    continue;
-                }
-
-                if l3_entry
-                    .flags()
-                    .contains(x86_64::structures::paging::PageTableFlags::PRESENT)
-                {
-                    let l2_table =
-                        l3_entry.addr().as_u64() as *mut x86_64::structures::paging::PageTable;
-                    let l2_table = unsafe { &mut *l2_table };
-                    for (l2_index, l2_entry) in l2_table.iter_mut().enumerate() {
-                        if l2_entry
-                            .flags()
-                            .contains(x86_64::structures::paging::PageTableFlags::HUGE_PAGE)
-                        {
-                            huge_pages
-                                .push(l2_entry)
-                                .expect("Failed to push huge page to vector");
-                            continue;
-                        }
-
-                        if l2_entry
-                            .flags()
-                            .contains(x86_64::structures::paging::PageTableFlags::PRESENT)
-                        {
-                            let l1_table = l2_entry.addr().as_u64()
-                                as *mut x86_64::structures::paging::PageTable;
-                            let l1_table = unsafe { &mut *l1_table };
-                            for (l1_index, l1_entry) in l1_table.iter_mut().enumerate() {
-                                let virt_addr = (l4_index as u64) << 39
-                                    | (l3_index as u64) << 30
-                                    | (l2_index as u64) << 21
-                                    | (l1_index as u64) << 12;
-
-                                if virt_addr >= 0x1_000_000
-                                    && l1_entry.flags().contains(
-                                        x86_64::structures::paging::PageTableFlags::PRESENT,
-                                    )
-                                {
-                                    log::trace!(
-                                        "removing page {:#x} -> {:#x} at frame {:#x}",
-                                        virt_addr,
-                                        l1_entry.addr().as_u64(),
-                                        core::ptr::from_ref(l1_entry) as u64,
-                                    );
-
-                                    l1_entry.set_unused();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }

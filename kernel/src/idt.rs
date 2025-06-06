@@ -3,7 +3,7 @@ use pc_keyboard::{KeyboardLayout, ScancodeSet};
 use x86_64::{
     structures::{
         idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
-        paging::{Mapper, Translate},
+        paging::Translate,
         port::PortRead,
     },
     VirtAddr,
@@ -351,7 +351,7 @@ extern "x86-interrupt" fn page_fault_handler(
 
         let mapping = process
             .paging
-            .offset_page_table
+            .page_table
             .translate(VirtAddr::new(address.as_u64()));
 
         match mapping {
@@ -361,10 +361,11 @@ extern "x86-interrupt" fn page_fault_handler(
                 flags,
             } => {
                 log::warn!(
-                    "Page fault in process {} ({:?}): {:#0x?}, caused by mapped address {:#0x} with flags {:?}",
+                    "Page fault in process {} ({:?}): {:#0x?}, caused by mapped address {:#0x} ({:#0x}) with flags {:?}",
                     process.pid(),
                     err,
                     stack_frame,
+                    address,
                     frame.start_address() + offset,
                     flags
                 );

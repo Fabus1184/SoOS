@@ -3,7 +3,7 @@ use core::sync::atomic::AtomicU32;
 use alloc::{borrow::ToOwned as _, collections::vec_deque::VecDeque, vec::Vec};
 use x86_64::structures::paging::{FrameAllocator as _, Mapper};
 
-use crate::kernel::paging::SoosPaging;
+use crate::kernel::paging::UserspacePaging;
 
 struct PidFactory {
     next_pid: AtomicU32,
@@ -34,7 +34,7 @@ pub enum State {
 pub struct Process {
     pid: u32,
     pub state: State,
-    pub paging: SoosPaging<'static>,
+    pub paging: UserspacePaging<'static>,
     cs: x86_64::structures::gdt::SegmentSelector,
     ds: x86_64::structures::gdt::SegmentSelector,
     pub flags: u64,
@@ -77,7 +77,6 @@ pub static CURRENT_PROCESS: AtomicU32 = AtomicU32::new(0);
 
 impl Process {
     pub fn user_from_elf(
-        hhdm_offset: u64,
         cs: x86_64::structures::gdt::SegmentSelector,
         ds: x86_64::structures::gdt::SegmentSelector,
         flags: u64,
@@ -87,45 +86,19 @@ impl Process {
 
         log::debug!("loading process with pid {pid}");
 
-        let frame_allocator = unsafe {
-            crate::kernel::paging::SOOS_FRAME_ALLOCATOR
-                .as_mut()
-                .expect("Frame allocator not initialized!")
-        };
+        let mut kernel_paging = crate::kernel_paging();
 
-        let process_page_table = frame_allocator
-            .allocate_frame()
-            .expect("Failed to allocate frame!")
-            .start_address()
-            .as_u64()
-            as *mut x86_64::structures::paging::PageTable;
-
-        log::debug!("process page table at {:#x}", process_page_table as u64);
-
-        {
-            let kernel_paging = crate::KERNEL_PAGING
-                .try_lock()
-                .expect("Failed to lock kernel paging");
-            kernel_paging
-                .offset_page_table
-                .level_4_table()
-                .clone_into(unsafe { &mut *process_page_table });
-        }
-
-        log::debug!("page table for pid {pid}: {:#x}", process_page_table as u64);
-
-        let mut paging =
-            SoosPaging::offset_page_table(hhdm_offset, unsafe { &mut *process_page_table });
+        let mut userspace_paging = kernel_paging.make_userspace_paging(&[]);
 
         let (userspace_address, userspace_stack, mapped_pages) =
-            crate::elf::load(&mut paging, frame_allocator, elf);
+            crate::elf::load(&mut userspace_paging, &mut kernel_paging, elf);
 
         log::debug!("elf for pid {pid} loaded at address {userspace_address:#x}, stack at {userspace_stack:#x}");
 
         Process {
             pid: PID_FACTORY.next_pid(),
             state: State::Ready,
-            paging,
+            paging: userspace_paging,
             cs,
             ds,
             flags,
@@ -167,7 +140,7 @@ impl Process {
     }
 
     pub fn fork(&self) -> Process {
-        let paging = self.paging.fork(self.mapped_pages.as_slice());
+        let paging = crate::kernel_paging().make_userspace_paging(&self.mapped_pages);
 
         Process {
             pid: PID_FACTORY.next_pid(),
@@ -207,7 +180,7 @@ impl Drop for Process {
     fn drop(&mut self) {
         for &(page, _flags) in &self.mapped_pages {
             self.paging
-                .offset_page_table
+                .page_table
                 .unmap(page)
                 .expect("Failed to unmap page")
                 .1

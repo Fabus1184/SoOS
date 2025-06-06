@@ -1,9 +1,10 @@
 use alloc::borrow::ToOwned as _;
 use x86_64::{
-    registers::control::Cr3,
+    registers::control::{Cr3, Cr3Flags},
     structures::paging::{
-        FrameAllocator, FrameDeallocator, MappedPageTable, Mapper, OffsetPageTable, Page,
-        PageTable, PageTableFlags, PhysFrame, Size4KiB, Translate,
+        mapper::{MappedFrame, TranslateResult},
+        FrameAllocator, FrameDeallocator, Mapper as _, OffsetPageTable, Page, PageTable,
+        PageTableFlags, PhysFrame, Size2MiB, Size4KiB, Translate,
     },
     PhysAddr, VirtAddr,
 };
@@ -15,64 +16,329 @@ pub fn current_page_table() -> *mut PageTable {
     level_4_table_frame.start_address().as_u64() as *mut PageTable
 }
 
-#[derive(Debug)]
-pub struct SoosPaging<'a> {
-    pub offset_page_table: MappedPageTable<'a>,
+const MAX_USABLE_FRAMES: usize = 1 << 20;
+
+/// The address where the kernel frame mapping starts.
+/// This is used to map all frames into virtual memory
+pub const KERNEL_FRAME_MAPPING_ADDRESS: u64 = 0x7776_0000_0000;
+
+pub struct KernelPaging {
+    pub page_table: OffsetPageTable<'static>,
+    pub frame_allocator: KernelFrameAllocator,
 }
 
-impl<'a> SoosPaging<'a> {
-    pub fn offset_page_table(phys_memory_offset: u64, page_table: &'a mut PageTable) -> Self {
-        let offset_page_table =
-            unsafe { OffsetPageTable::new(page_table, VirtAddr::new(phys_memory_offset)) };
+pub struct KernelFrameAllocator {
+    bitmap: &'static mut [bool; MAX_USABLE_FRAMES],
+    memmap: SoosMemmap,
+    skip: usize,
+    allocated: usize,
+}
 
-        Self { offset_page_table }
+unsafe impl FrameAllocator<Size4KiB> for KernelFrameAllocator {
+    fn allocate_frame(&mut self) -> Option<PhysFrame> {
+        let result = self
+            .memmap
+            .iter_usable_frames()
+            .enumerate()
+            .skip(self.skip)
+            .take_while(|(_, frame)| {
+                frame.start_address().as_u64() as usize / 4096 < self.bitmap.len()
+            })
+            .find(|&(_, frame)| !self.bitmap[frame.start_address().as_u64() as usize / 4096]);
+
+        let Some((index, frame)) = result else {
+            self.skip = 0;
+            log::warn!("No free frame found, resetting skip to 0");
+            return self.allocate_frame();
+        };
+
+        self.bitmap[frame.start_address().as_u64() as usize / 4096] = true;
+        self.skip = index;
+
+        self.allocated += 1;
+
+        assert!(
+            self.allocated < 1000,
+            "allocated more than 1000 frames, this is not expected!"
+        );
+
+        Some(frame)
+    }
+}
+
+impl FrameDeallocator<Size4KiB> for KernelFrameAllocator {
+    unsafe fn deallocate_frame(&mut self, frame: PhysFrame<Size4KiB>) {
+        let i = frame.start_address().as_u64() as usize / 4096;
+        if i < self.bitmap.len() {
+            self.bitmap[i] = false;
+        }
+    }
+}
+
+impl KernelPaging {
+    /// Creates a new [`KernelPaging`] instance, initializing the page table
+    /// all frames are mapped at [`KERNEL_FRAME_MAPPING_ADDRESS`]
+    pub fn make_kernel_paging(
+        memmap: &SoosMemmap,
+        old_page_table: &mut OffsetPageTable,
+        keep_pages: impl Iterator<Item = Page>,
+    ) -> Self {
+        static mut PAGE_TABLE: PageTable = PageTable::new();
+
+        let mut kernel_page_table = unsafe {
+            OffsetPageTable::new(&mut PAGE_TABLE, VirtAddr::new(KERNEL_FRAME_MAPPING_ADDRESS))
+        };
+
+        let mut frame_allocator = KernelFrameAllocator {
+            bitmap: {
+                static mut BITMAP: [bool; MAX_USABLE_FRAMES] = [false; MAX_USABLE_FRAMES];
+                unsafe { &mut BITMAP }
+            },
+            memmap: *memmap,
+            skip: 0,
+            allocated: 0,
+        };
+
+        // walk old page table and mark all frames as used
+        for l4_index in 0..512 {
+            let l4_entry = &old_page_table.level_4_table()[l4_index];
+            if l4_entry.is_unused() {
+                continue;
+            }
+
+            let l3_table = unsafe { &*((l4_entry.addr().as_u64()) as *const PageTable) };
+            for l3_index in 0..512 {
+                let l3_entry = &l3_table[l3_index];
+                if l3_entry.is_unused() {
+                    continue;
+                }
+
+                assert!(
+                    !l3_entry.flags().contains(PageTableFlags::HUGE_PAGE),
+                    "Huge pages are not supported in kernel paging: {:#x}",
+                    l3_entry.addr().as_u64()
+                );
+
+                let l2_table = unsafe { &*((l3_entry.addr().as_u64()) as *const PageTable) };
+                for l2_index in 0..512 {
+                    let l2_entry = &l2_table[l2_index];
+                    if l2_entry.is_unused() {
+                        continue;
+                    }
+
+                    if l2_entry.flags().contains(PageTableFlags::HUGE_PAGE) {
+                        for frame_index in 0..512 {
+                            let frame_address = l2_entry.addr().as_u64() + (frame_index * 0x1000);
+                            let frame = PhysFrame::<Size2MiB>::containing_address(PhysAddr::new(
+                                frame_address,
+                            ));
+                            if frame.start_address().as_u64() as usize / 4096
+                                < frame_allocator.bitmap.len()
+                            {
+                                frame_allocator.bitmap
+                                    [frame.start_address().as_u64() as usize / 4096] = true;
+                            }
+                        }
+                    } else {
+                        // 4KiB page
+                        let l1_table =
+                            unsafe { &*((l2_entry.addr().as_u64()) as *const PageTable) };
+                        for l1_index in 0..512 {
+                            let l1_entry = &l1_table[l1_index];
+                            if l1_entry.is_unused() {
+                                continue;
+                            }
+
+                            let frame = PhysFrame::<Size4KiB>::containing_address(l1_entry.addr());
+                            frame_allocator.bitmap
+                                [frame.start_address().as_u64() as usize / 4096] = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        let count = memmap
+            .iter_usable_frames()
+            .take_while(|frame| {
+                frame.start_address().as_u64() as usize / 4096 < frame_allocator.bitmap.len()
+            })
+            .filter(|frame| !frame_allocator.bitmap[frame.start_address().as_u64() as usize / 4096])
+            .count();
+        log::debug!("found {count} free frames in old page table");
+
+        // map all frames
+        let mut mapped = 0;
+        for frame in memmap.iter_usable_frames() {
+            if frame.start_address().as_u64() as usize / 4096 >= frame_allocator.bitmap.len() {
+                break; // out of bounds, can never be allocated
+            }
+
+            if frame_allocator.bitmap[frame.start_address().as_u64() as usize / 4096] {
+                continue; // already used
+            }
+
+            if mapped == 1000 {
+                log::warn!("mapped 1000 frames, this is enough");
+                break;
+            }
+
+            let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
+
+            log::trace!(
+                "mapping frame {mapped}/{count}, {:#x} at {:#x}",
+                frame.start_address().as_u64(),
+                KERNEL_FRAME_MAPPING_ADDRESS + frame.start_address().as_u64()
+            );
+            mapped += 1;
+
+            unsafe {
+                // map the frame to the old page table
+                old_page_table
+                    .map_to(
+                        Page::<Size4KiB>::containing_address(VirtAddr::new(
+                            KERNEL_FRAME_MAPPING_ADDRESS + frame.start_address().as_u64(),
+                        )),
+                        frame,
+                        flags,
+                        &mut frame_allocator,
+                    )
+                    .expect("Failed to map frame in kernel page table")
+                    .flush();
+            }
+        }
+
+        for page in keep_pages {
+            match old_page_table.translate(page.start_address()) {
+                TranslateResult::Mapped { frame, offset, .. } => {
+                    if offset != 0 {
+                        continue;
+                    }
+
+                    log::trace!(
+                        "keeping page {:#x} mapped to frame {:#x} with offset {:#x}",
+                        page.start_address().as_u64(),
+                        frame.start_address().as_u64(),
+                        offset
+                    );
+
+                    let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
+
+                    match frame {
+                        MappedFrame::Size4KiB(phys_frame) => unsafe {
+                            kernel_page_table
+                                .map_to(page, phys_frame, flags, &mut frame_allocator)
+                                .expect("Failed to map frame in kernel page table")
+                                .flush();
+                        },
+                        MappedFrame::Size2MiB(phys_frame) => unsafe {
+                            kernel_page_table
+                                .map_to(
+                                    Page::<Size2MiB>::containing_address(page.start_address()),
+                                    phys_frame,
+                                    flags,
+                                    &mut frame_allocator,
+                                )
+                                .expect("Failed to map 2MiB frame in kernel page table")
+                                .flush();
+                        },
+                        MappedFrame::Size1GiB(phys_frame) => panic!(
+                            "1GiB pages are not supported in kernel paging: {:#x}",
+                            phys_frame.start_address().as_u64()
+                        ),
+                    }
+                }
+                TranslateResult::NotMapped => {
+                    log::trace!(
+                        "keeping page {:#x} not mapped",
+                        page.start_address().as_u64()
+                    );
+                    // do nothing, the page is not mapped
+                }
+                e @ TranslateResult::InvalidFrameAddress(_) => {
+                    panic!("unexpected translation result: {:?}", e)
+                }
+            }
+        }
+
+        let mut self_ = Self {
+            page_table: kernel_page_table,
+            frame_allocator,
+        };
+
+        log::debug!(
+            "kernel paging initialized with {} frames",
+            self_.frame_allocator.bitmap.len()
+        );
+
+        self_.load();
+
+        log::debug!("Kernel paging initialized");
+
+        self_
     }
 
     pub fn load(&mut self) {
-        let flags = Cr3::read().1;
-        let addr = core::ptr::from_ref(self.offset_page_table.level_4_table()) as u64;
-        let physical_address = self
-            .offset_page_table
-            .translate_addr(VirtAddr::new(addr))
-            .expect("Failed to translate address");
+        let addr = core::ptr::from_ref(self.page_table.level_4_table()) as u64;
+        let physical_address = PhysFrame::containing_address(
+            match self.page_table.translate(VirtAddr::new(addr)) {
+                TranslateResult::Mapped {
+                    frame,
+                    offset,
+                    flags,
+                } => {
+                    log::debug!(
+                        "translated kernel page table at {:#x} to {:#x} with offset {:#x} and flags {:?}",
+                        addr,
+                        frame.start_address().as_u64(),
+                        offset,
+                        flags
+                    );
+
+                    assert!(offset == 0, "Offset must be zero for kernel page table");
+
+                    match frame {
+                        MappedFrame::Size4KiB(phys_frame) => phys_frame.start_address(),
+                        e => panic!("unexpected frame type of kernel page table: {:?}", e),
+                    }
+                }
+                e => panic!("unexpected translation result: {:?}", e),
+            },
+        );
 
         log::debug!(
-            "Loading page table at {:#x} with flags",
-            physical_address.as_u64(),
+            "loading kernel page table at {:#x}",
+            physical_address.start_address().as_u64()
         );
 
         unsafe {
-            Cr3::write(PhysFrame::containing_address(physical_address), flags);
+            Cr3::write(physical_address, Cr3Flags::empty());
         }
     }
 
-    pub fn fork(&self, pages: &[(Page, PageTableFlags)]) -> Self {
-        let mut kernel_paging = crate::KERNEL_PAGING.lock();
-        kernel_paging.load();
-
-        let frame_allocator = unsafe {
-            SOOS_FRAME_ALLOCATOR
-                .as_mut()
-                .expect("Frame allocator not initialized!")
-        };
-
-        let new_pagetable = frame_allocator
+    pub fn make_userspace_paging(
+        &mut self,
+        extra_pages: &[(Page, PageTableFlags)],
+    ) -> UserspacePaging<'static> {
+        let new_pagetable = self
+            .frame_allocator
             .allocate_frame()
-            .expect("Failed to allocate frame!")
-            .start_address()
-            .as_u64() as *mut x86_64::structures::paging::PageTable;
+            .expect("Failed to allocate frame!");
 
-        kernel_paging
-            .offset_page_table
+        let new_pagetable_ptr = (self.page_table.phys_offset().as_u64()
+            + new_pagetable.start_address().as_u64())
+            as *mut PageTable;
+
+        self.page_table
             .level_4_table()
-            .clone_into(unsafe { &mut *new_pagetable });
+            .clone_into(unsafe { &mut *new_pagetable_ptr });
 
-        let mut offset_page_table = unsafe {
-            OffsetPageTable::new(&mut *new_pagetable, self.offset_page_table.phys_offset())
-        };
+        let mut offset_page_table =
+            unsafe { OffsetPageTable::new(&mut *new_pagetable_ptr, self.page_table.phys_offset()) };
 
-        for &(page, flags) in pages {
-            let new_frame = frame_allocator
+        for &(page, flags) in extra_pages {
+            let new_frame = self
+                .frame_allocator
                 .allocate_frame()
                 .expect("Failed to allocate frame for cloned page table");
 
@@ -83,7 +349,7 @@ impl<'a> SoosPaging<'a> {
 
             unsafe {
                 offset_page_table
-                    .map_to(page, new_frame, flags, frame_allocator)
+                    .map_to(page, new_frame, flags, &mut self.frame_allocator)
                     .expect("Failed to map frame in cloned page table")
                     .flush();
             };
@@ -92,31 +358,29 @@ impl<'a> SoosPaging<'a> {
             let virt_addr = VirtAddr::new(0x77CC_BBBB_C000);
 
             let old_frame = self
-                .offset_page_table
+                .page_table
                 .translate_page(page)
                 .expect("Failed to translate page")
                 .start_address();
 
             // map old and new frames to temporary pages
             unsafe {
-                kernel_paging
-                    .offset_page_table
+                self.page_table
                     .map_to(
                         Page::<Size4KiB>::containing_address(virt_addr),
                         PhysFrame::containing_address(old_frame),
                         PageTableFlags::PRESENT,
-                        frame_allocator,
+                        &mut self.frame_allocator,
                     )
                     .expect("Failed to map frame in cloned page table")
                     .flush();
 
-                kernel_paging
-                    .offset_page_table
+                self.page_table
                     .map_to(
                         Page::containing_address(virt_addr + 0x1000),
                         new_frame,
                         PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
-                        frame_allocator,
+                        &mut self.frame_allocator,
                     )
                     .expect("Failed to map frame in cloned page table")
                     .flush();
@@ -134,72 +398,50 @@ impl<'a> SoosPaging<'a> {
 
             // unmap the temporary pages
             unsafe {
-                let (frame, flush) = kernel_paging
-                    .offset_page_table
+                let (frame, flush) = self
+                    .page_table
                     .unmap(Page::<Size4KiB>::containing_address(virt_addr))
                     .expect("Failed to unmap old frame in cloned page table");
-                frame_allocator.deallocate_frame(frame);
+                self.frame_allocator.deallocate_frame(frame);
                 flush.flush();
 
-                let (frame, flush) = kernel_paging
-                    .offset_page_table
+                let (frame, flush) = self
+                    .page_table
                     .unmap(Page::<Size4KiB>::containing_address(virt_addr + 0x1000))
                     .expect("Failed to unmap new frame in cloned page table");
-                frame_allocator.deallocate_frame(frame);
+                self.frame_allocator.deallocate_frame(frame);
                 flush.flush();
             }
         }
 
-        Self { offset_page_table }
+        UserspacePaging {
+            page_table: offset_page_table,
+        }
     }
 }
 
-const MAX_USABLE_FRAMES: usize = 1 << 10;
-
-pub static mut SOOS_FRAME_ALLOCATOR: Option<SoosFrameAllocator> = None;
-
-#[derive(Debug)]
-pub struct SoosFrameAllocator {
-    bitmap: &'static mut [bool; MAX_USABLE_FRAMES],
-    memmap: SoosMemmap,
+pub struct UserspacePaging<'a> {
+    pub page_table: OffsetPageTable<'a>,
 }
 
-impl SoosFrameAllocator {
-    pub fn init_empty(memmap: &SoosMemmap) {
-        static mut BITMAP: [bool; MAX_USABLE_FRAMES] = [false; MAX_USABLE_FRAMES];
+impl UserspacePaging<'_> {
+    pub fn load(&mut self) {
+        let addr = core::ptr::from_ref(self.page_table.level_4_table()) as u64;
+        let physical_address = self
+            .page_table
+            .translate_addr(VirtAddr::new(addr))
+            .expect("Failed to translate address");
+
+        log::trace!(
+            "loading userspace page table at {:#x}",
+            physical_address.as_u64(),
+        );
 
         unsafe {
-            SOOS_FRAME_ALLOCATOR.get_or_insert(Self {
-                memmap: *memmap,
-                bitmap: &mut BITMAP,
-            })
-        };
-    }
-}
-
-unsafe impl FrameAllocator<Size4KiB> for SoosFrameAllocator {
-    fn allocate_frame(&mut self) -> Option<PhysFrame> {
-        let address = self
-            .memmap
-            .iter_usable_addresses()
-            .step_by(4096)
-            .take_while(|&addr| addr < 0x1_000_000)
-            .find(|&addr| (!self.bitmap[addr as usize / 4096]))
-            .expect("No free frames available");
-
-        self.bitmap[address as usize / 4096] = true;
-
-        log::debug!("allocated frame at {address:#0x}");
-
-        Some(PhysFrame::containing_address(PhysAddr::new(address)))
-    }
-}
-
-impl FrameDeallocator<Size4KiB> for SoosFrameAllocator {
-    unsafe fn deallocate_frame(&mut self, frame: PhysFrame<Size4KiB>) {
-        let i = frame.start_address().as_u64() as usize / 4096;
-        if i < self.bitmap.len() {
-            self.bitmap[i] = false;
+            Cr3::write(
+                PhysFrame::containing_address(physical_address),
+                Cr3Flags::empty(),
+            );
         }
     }
 }
