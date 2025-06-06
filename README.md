@@ -1,6 +1,12 @@
 # SoOS
 
 x86_64 operating system written in Rust.
+Booting with [Limine](https://github.com/limine-bootloader/limine)
+Userspace library & application written in Zig.
+
+## 'inspirational' screenshots
+
+![image](https://github.com/user-attachments/assets/bde3d25e-c99b-4c2c-b47f-672b167674e0)
 
 ## Done
 
@@ -43,9 +49,3 @@ x86_64 operating system written in Rust.
 - [ ] CI
 - [ ] More careful / isolated use of `unsafe`
 - [ ] real cross-compilation
-
-## "inspirational" screenshots
-
-![image](https://github.com/user-attachments/assets/bde3d25e-c99b-4c2c-b47f-672b167674e0)
-
-
