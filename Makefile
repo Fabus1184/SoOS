@@ -42,7 +42,6 @@ build/SoOS.iso: build/iso-root $(LIMINE_FILES) $(LIMINE_BIN) $(KERNEL)
 		build/iso-root -o build/SoOS.iso
 
 	$(LIMINE_BIN) bios-install build/SoOS.iso
-	
 
 run: build/SoOS.iso
 	qemu-system-x86_64 \

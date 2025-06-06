@@ -19,7 +19,10 @@ jobs:
             - name: install dependencies
               run: >
                   sudo apt install libisoburn1t64 &&
-                  rustup toolchain install nightly
+                  rustup toolchain install nightly &&
+                  wget https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz &&
+                  tar -xf *.tar.xz &&
+                  ln -s zig-*/zig /usr/local/bin/zig
 
             - name: make
               run: make build/SoOS.iso
