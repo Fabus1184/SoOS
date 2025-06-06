@@ -1,8 +1,10 @@
 # SoOS
 
-x86_64 operating system written in Rust.
-Booting with [Limine](https://github.com/limine-bootloader/limine)
-Userspace library & application written in Zig.
+x86_64 operating system written in Rust
+
+The kernel is written in Rust, small parts in assembly.
+Userspace library & applications written in Zig.  
+Booting with [Limine](https://github.com/limine-bootloader/limine).
 
 ## 'inspirational' screenshots
 
