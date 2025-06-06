@@ -20,10 +20,11 @@ jobs:
               run: >
                   set -xeu &&
                   sudo apt install libisoburn1t64 &&
-                  rustup toolchain install nightly &&
                   wget https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz &&
                   tar xf *.tar.xz &&
-                  echo $PWD/zig*/ >> $GITHUB_PATH
+                  echo $PWD/zig*/ >> $GITHUB_PATH &&
+                  rustup toolchain install nightly &&
+                  rustup target add x86_64-unknown-none
 
             - name: make
               run: make build/SoOS.iso
