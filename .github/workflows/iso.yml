@@ -14,7 +14,8 @@ jobs:
         runs-on: ubuntu-latest
 
         steps:
-            - uses: actions/checkout@v4
+            - name: checkout
+              uses: actions/checkout@v4
 
             - name: install dependencies
               run: >
@@ -28,3 +29,9 @@ jobs:
 
             - name: make
               run: make build/SoOS.iso
+
+            - name: upload iso
+              uses: actions/upload-artifact@v4
+              with:
+                  name: SoOS.iso
+                  path: build/SoOS.iso
