@@ -1,5 +1,6 @@
 use core::fmt::Write as _;
 use log::LevelFilter;
+use ringbuffer::RingBuffer;
 
 use crate::term;
 pub struct KernelLogger {
@@ -36,6 +37,12 @@ impl KernelLogger {
             .get()
             .expect("logger ringbuffer not initialized")
             .lock()
+    }
+
+    pub fn try_lock_ringbuffer(
+        &self,
+    ) -> Option<spin::MutexGuard<'_, ringbuffer::AllocRingBuffer<u8>>> {
+        self.ringbuffer.get().and_then(spin::mutex::Mutex::try_lock)
     }
 }
 
@@ -80,7 +87,7 @@ impl log::Log for KernelLogger {
             .expect("Failed to write log message");
         }
 
-        if !self.ringbuffer.is_completed() || record.level() == log::Level::Warn {
+        if !self.ringbuffer.is_completed() || record.level() <= log::Level::Warn {
             writeln!(
                 term::TERM.writer(),
                 "{color}[{}] ({}:{}) {}",

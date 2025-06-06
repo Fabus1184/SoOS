@@ -4,7 +4,7 @@ use x86_64::{
     structures::paging::{
         mapper::{MappedFrame, TranslateResult},
         FrameAllocator, FrameDeallocator, Mapper as _, OffsetPageTable, Page, PageTable,
-        PageTableFlags, PhysFrame, Size2MiB, Size4KiB, Translate,
+        PageTableFlags, PhysFrame, Size1GiB, Size2MiB, Size4KiB, Translate,
     },
     PhysAddr, VirtAddr,
 };
@@ -113,11 +113,21 @@ impl KernelPaging {
                     continue;
                 }
 
-                assert!(
-                    !l3_entry.flags().contains(PageTableFlags::HUGE_PAGE),
-                    "Huge pages are not supported in kernel paging: {:#x}",
-                    l3_entry.addr().as_u64()
-                );
+                if l3_entry.flags().contains(PageTableFlags::HUGE_PAGE) {
+                    // 1GiB page
+                    for frame_index in 0..512 * 512 {
+                        let frame_address = l3_entry.addr().as_u64() + (frame_index * 0x1000);
+                        let frame =
+                            PhysFrame::<Size1GiB>::containing_address(PhysAddr::new(frame_address));
+                        if frame.start_address().as_u64() as usize / 4096
+                            < frame_allocator.bitmap.len()
+                        {
+                            frame_allocator.bitmap
+                                [frame.start_address().as_u64() as usize / 4096] = true;
+                        }
+                    }
+                    continue;
+                }
 
                 let l2_table = unsafe { &*((l3_entry.addr().as_u64()) as *const PageTable) };
                 for l2_index in 0..512 {
@@ -127,6 +137,7 @@ impl KernelPaging {
                     }
 
                     if l2_entry.flags().contains(PageTableFlags::HUGE_PAGE) {
+                        // 2MiB page
                         for frame_index in 0..512 {
                             let frame_address = l2_entry.addr().as_u64() + (frame_index * 0x1000);
                             let frame = PhysFrame::<Size2MiB>::containing_address(PhysAddr::new(
@@ -280,21 +291,9 @@ impl KernelPaging {
 
     pub fn load(&mut self) {
         let addr = core::ptr::from_ref(self.page_table.level_4_table()) as u64;
-        let physical_address = PhysFrame::containing_address(
-            match self.page_table.translate(VirtAddr::new(addr)) {
-                TranslateResult::Mapped {
-                    frame,
-                    offset,
-                    flags,
-                } => {
-                    log::debug!(
-                        "translated kernel page table at {:#x} to {:#x} with offset {:#x} and flags {:?}",
-                        addr,
-                        frame.start_address().as_u64(),
-                        offset,
-                        flags
-                    );
-
+        let physical_address =
+            PhysFrame::containing_address(match self.page_table.translate(VirtAddr::new(addr)) {
+                TranslateResult::Mapped { frame, offset, .. } => {
                     assert!(offset == 0, "Offset must be zero for kernel page table");
 
                     match frame {
@@ -303,13 +302,7 @@ impl KernelPaging {
                     }
                 }
                 e => panic!("unexpected translation result: {:?}", e),
-            },
-        );
-
-        log::debug!(
-            "loading kernel page table at {:#x}",
-            physical_address.start_address().as_u64()
-        );
+            });
 
         unsafe {
             Cr3::write(physical_address, Cr3Flags::empty());
@@ -342,7 +335,7 @@ pub struct UserspacePaging<'a> {
 }
 
 impl UserspacePaging<'_> {
-    pub fn load(&mut self) {
+    pub fn load(&self) {
         let addr = core::ptr::from_ref(self.page_table.level_4_table()) as u64;
         let physical_address = self
             .page_table
@@ -365,8 +358,10 @@ impl UserspacePaging<'_> {
     pub fn fork(
         &self,
         kernel_paging: &mut KernelPaging,
-        extra_pages: &[(Page, PageTableFlags)],
+        pages: &[(Page, PageTableFlags)],
     ) -> UserspacePaging<'static> {
+        kernel_paging.load();
+
         let new_pagetable = kernel_paging
             .frame_allocator
             .allocate_frame()
@@ -376,22 +371,25 @@ impl UserspacePaging<'_> {
             + new_pagetable.start_address().as_u64())
             as *mut PageTable;
 
-        self.page_table
-            .level_4_table()
-            .clone_into(unsafe { &mut *new_pagetable_ptr });
-
         let mut new_page_table =
             unsafe { OffsetPageTable::new(&mut *new_pagetable_ptr, self.page_table.phys_offset()) };
 
-        for &(page, flags) in extra_pages {
+        kernel_paging
+            .page_table
+            .level_4_table()
+            .clone_into(new_page_table.level_4_table_mut());
+
+        for &(page, flags) in pages {
             let new_frame = kernel_paging
                 .frame_allocator
                 .allocate_frame()
                 .expect("Failed to allocate frame for cloned page table");
 
             log::debug!(
-                "Cloning page {:#x} to new frame",
+                "cloning page {:#x} with flags {:?} to new frame {:#x}",
                 page.start_address().as_u64(),
+                flags,
+                new_frame.start_address().as_u64()
             );
 
             unsafe {
@@ -402,7 +400,8 @@ impl UserspacePaging<'_> {
             };
 
             // find free address to map the old and new frames
-            let virt_addr = VirtAddr::new(0x8888_0000_0000);
+            let temp_addr_src = VirtAddr::new_truncate(0x8888_0000_0000);
+            let temp_addr_dst = temp_addr_src + 0x1000;
 
             let old_frame = self
                 .page_table
@@ -410,12 +409,12 @@ impl UserspacePaging<'_> {
                 .expect("Failed to translate page")
                 .start_address();
 
-            // map old and new frames to temporary pages
+            // map old and new frames to temporary addresses for copying
             unsafe {
                 kernel_paging
                     .page_table
                     .map_to(
-                        Page::<Size4KiB>::containing_address(virt_addr),
+                        Page::<Size4KiB>::containing_address(temp_addr_src),
                         PhysFrame::containing_address(old_frame),
                         PageTableFlags::PRESENT,
                         &mut kernel_paging.frame_allocator,
@@ -426,7 +425,7 @@ impl UserspacePaging<'_> {
                 kernel_paging
                     .page_table
                     .map_to(
-                        Page::containing_address(virt_addr + 0x1000),
+                        Page::containing_address(temp_addr_dst),
                         new_frame,
                         PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
                         &mut kernel_paging.frame_allocator,
@@ -435,13 +434,10 @@ impl UserspacePaging<'_> {
                     .flush();
             };
 
-            // copy the data
-            for i in 0..0x1000 {
-                let old_byte = unsafe { (virt_addr + i).as_ptr::<u8>().read_volatile() };
-                unsafe {
-                    (virt_addr + 0x1000 + i)
-                        .as_mut_ptr::<u8>()
-                        .write_volatile(old_byte);
+            unsafe {
+                for i in 0..0x1000 {
+                    let byte = temp_addr_src.as_mut_ptr::<u8>().add(i).read_volatile();
+                    temp_addr_dst.as_mut_ptr::<u8>().add(i).write_volatile(byte);
                 }
             }
 
@@ -449,16 +445,15 @@ impl UserspacePaging<'_> {
             unsafe {
                 let (frame, flush) = kernel_paging
                     .page_table
-                    .unmap(Page::<Size4KiB>::containing_address(virt_addr))
+                    .unmap(Page::<Size4KiB>::containing_address(temp_addr_src))
                     .expect("Failed to unmap old frame in cloned page table");
                 kernel_paging.frame_allocator.deallocate_frame(frame);
                 flush.flush();
 
-                let (frame, flush) = kernel_paging
+                let (_frame, flush) = kernel_paging
                     .page_table
-                    .unmap(Page::<Size4KiB>::containing_address(virt_addr + 0x1000))
+                    .unmap(Page::<Size4KiB>::containing_address(temp_addr_dst))
                     .expect("Failed to unmap new frame in cloned page table");
-                kernel_paging.frame_allocator.deallocate_frame(frame);
                 flush.flush();
             }
         }

@@ -172,7 +172,7 @@ fn fork(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
     process_lock.get_processes().push_back(new_process);
 
     // return the pid of the new process in rax
-    process_lock.get().registers.rax = pid as u64;
+    process_lock.get().registers.rax = u64::from(pid);
 }
 
 /// Open a file at the path in rbx, with the length in rcx

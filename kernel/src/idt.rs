@@ -357,46 +357,46 @@ extern "x86-interrupt" fn page_fault_handler(
         match mapping {
             x86_64::structures::paging::mapper::TranslateResult::Mapped {
                 frame,
-                offset,
                 flags,
+                ..
             } => {
                 log::warn!(
-                    "Page fault in process {} ({:?}): {:#0x?}, caused by mapped address {:#0x} ({:#0x}) with flags {:?}",
+                    "Page fault in process {} ({err:?}): {stack_frame:#x?}, caused by mapped address {address:#x} ({:x}) with flags {flags:?}",
                     process.pid(),
-                    err,
-                    stack_frame,
-                    address,
-                    frame.start_address() + offset,
-                    flags
+                    frame.start_address(),                    
                 );
             }
             x86_64::structures::paging::mapper::TranslateResult::NotMapped => log::warn!(
-                "Page fault in process {} ({:?}): {:#0x?}, caused by unmapped address {:#0x}",
+                "Page fault in process {} ({err:?}): {stack_frame:#x?}, caused by unmapped address {address:#x}",
                 process.pid(),
-                err,
-                stack_frame,
-                address
             ),
             x86_64::structures::paging::mapper::TranslateResult::InvalidFrameAddress(phys_addr) => {
-                log::warn!(
-                    "Page fault in process {} ({:?}): {:#0x?}, caused by invalid mapping address {:#0x} with physical address {:#0x}",
-                    process.pid(),
-                    err,
-                    stack_frame,
-                    address,
-                    phys_addr
-                );
+                log::warn!("Page fault in process {} ({err:?}): {stack_frame:#x?}, caused by invalid mapping address {address:#x} with physical address {phys_addr:x}", process.pid());
             }
         }
+        log::warn!("{:#x?}", process.registers);
 
         drop(process_lock);
 
         process::try_schedule().expect("Failed to schedule a process after page fault");
     } else {
-        panic!(
-            "Page fault in kernel mode: {:#0x?}\nError code: {:?}\nAddress: {:#0x}",
-            stack_frame, err, address
-        );
+        unsafe { crate::KERNEL_PAGING.get().unwrap().force_unlock() };
+        let paging = crate::KERNEL_PAGING.get().unwrap();
+
+        match paging
+            .lock()
+            .page_table
+            .translate(VirtAddr::new(address.as_u64()))
+        {
+            x86_64::structures::paging::mapper::TranslateResult::Mapped {
+                frame, flags, ..
+            } => {
+                panic!("page fault in kernel mode ({err:?}): {stack_frame:#x?}, caused by mapped address {:#x} ({:x}) with flags {:?}", address, frame.start_address(), flags);
+            }
+            e => {
+                panic!("page fault in kernel mode ({err:?}): {stack_frame:#x?}, caused by unmapped address {address:#x} ({e:?})");
+            }
+        }
     }
 }
 

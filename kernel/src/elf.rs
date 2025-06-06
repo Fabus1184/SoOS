@@ -51,10 +51,6 @@ pub fn load(
 
         // map page for copying program
         for page in Page::range_inclusive(start_page, end_page) {
-            if pages.iter().any(|(p, _)| *p == page) {
-                log::warn!("Page {page:#?} is already mapped!");
-                continue;
-            }
             pages.push((page, flags));
 
             let frame = kernel_paging

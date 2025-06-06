@@ -1,7 +1,7 @@
 use core::sync::atomic::AtomicU32;
 
 use alloc::{collections::vec_deque::VecDeque, vec::Vec};
-use x86_64::structures::paging::Mapper;
+use x86_64::structures::paging::{Mapper, Translate};
 
 use crate::kernel::paging::UserspacePaging;
 
@@ -141,6 +141,7 @@ impl Process {
 
     pub fn fork(&self) -> Process {
         let mut kernel_paging = crate::kernel_paging();
+
         let forked_paging = self.paging.fork(&mut kernel_paging, &self.mapped_pages);
 
         Process {
@@ -250,19 +251,20 @@ pub fn try_schedule() -> Option<!> {
 
                         CURRENT_PROCESS.store(process.pid, core::sync::atomic::Ordering::Relaxed);
 
-                        process.load_paging();
-
                         let cs = process.cs.0 as u64;
                         let ds = process.ds.0 as u64;
                         let flags = process.flags;
                         let rip = process.rip;
                         let registers = process.registers;
 
+                        x86_64::instructions::interrupts::disable();
+                        process.load_paging();
+
                         processes.rotate_left(1);
                         drop(processes);
 
                         unsafe {
-                            crate::do_iret(cs, ds, flags, rip, &registers);
+                            crate::do_iret(cs, ds, flags, rip, &raw const registers);
                         };
                     } else {
                         processes.rotate_left(1);
