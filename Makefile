@@ -34,7 +34,7 @@ build/iso-root: $(KERNEL) $(LIMINE_FILES)
 	mkdir -p build/iso-root/EFI/BOOT
 	cp -v $(LIMINE)/bin/BOOT*.EFI build/iso-root/EFI/BOOT/
 
-run: $(LIMINE_FILES) $(LIMINE_BIN) build/iso-root $(KERNEL)
+build/SoOS.iso: build/iso-root $(LIMINE_FILES) $(LIMINE_BIN) $(KERNEL)
 	xorriso -as mkisofs -b limine-bios-cd.bin \
 		-no-emul-boot -boot-load-size 4 -boot-info-table \
 		--efi-boot limine-uefi-cd.bin \
@@ -42,7 +42,9 @@ run: $(LIMINE_FILES) $(LIMINE_BIN) build/iso-root $(KERNEL)
 		build/iso-root -o build/SoOS.iso
 
 	$(LIMINE_BIN) bios-install build/SoOS.iso
+	
 
+run: build/SoOS.iso
 	qemu-system-x86_64 \
 		-cpu qemu64,+la57 -cdrom build/SoOS.iso -d guest_errors,cpu_reset -m 8G -M smm=off -s \
 		-no-shutdown -no-reboot
