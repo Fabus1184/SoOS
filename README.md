@@ -51,6 +51,6 @@ x86_64 operating system written in Rust.
 
 ## "inspirational" screenshots
 
-![image](https://github.com/user-attachments/assets/d88af044-64eb-45a9-bab5-2ca515f808d7)
+![image](https://github.com/user-attachments/assets/bde3d25e-c99b-4c2c-b47f-672b167674e0)
 
 
