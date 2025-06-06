@@ -1,3 +1,5 @@
+[![SoOS.iso](https://github.com/Fabus1184/SoOS/actions/workflows/iso.yml/badge.svg)](https://github.com/Fabus1184/SoOS/actions/workflows/iso.yml)
+
 # SoOS
 
 x86_64 operating system written in Rust
