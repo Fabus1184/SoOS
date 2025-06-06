@@ -56,8 +56,8 @@ pub fn listdir(path: []const u8, index: u64, buffer: []u8) u64 {
     return result;
 }
 
-pub fn read(fd: u64, buffer: []u8) u64 {
-    var result: u64 = 0;
+pub fn read(fd: u64, buffer: []u8) ?u64 {
+    var result: i64 = 0;
 
     asm volatile ("int $0x80"
         : [result] "={rax}" (result),
@@ -68,7 +68,11 @@ pub fn read(fd: u64, buffer: []u8) u64 {
         : "rax", "rbx", "rcx", "rdx"
     );
 
-    return result;
+    if (result >= 0) {
+        return @intCast(result);
+    } else {
+        return null;
+    }
 }
 
 pub fn fork() u32 {
@@ -83,8 +87,8 @@ pub fn fork() u32 {
     return result;
 }
 
-pub fn open(path: []const u8) u64 {
-    var result: u64 = 0;
+pub fn open(path: []const u8) ?u64 {
+    var result: i64 = 0;
 
     asm volatile ("int $0x80"
         : [result] "={rax}" (result),
@@ -94,7 +98,11 @@ pub fn open(path: []const u8) u64 {
         : "rax", "rbx", "rcx"
     );
 
-    return result;
+    if (result >= 0) {
+        return @intCast(result);
+    } else {
+        return null;
+    }
 }
 
 pub fn close(fd: u64) u64 {

@@ -1,7 +1,7 @@
 use core::sync::atomic::AtomicU32;
 
-use alloc::{borrow::ToOwned as _, collections::vec_deque::VecDeque, vec::Vec};
-use x86_64::structures::paging::{FrameAllocator as _, Mapper};
+use alloc::{collections::vec_deque::VecDeque, vec::Vec};
+use x86_64::structures::paging::Mapper;
 
 use crate::kernel::paging::UserspacePaging;
 
@@ -71,8 +71,8 @@ impl FileDescriptor {
     }
 }
 
-pub static PROCESSES: spin::Lazy<spin::Mutex<VecDeque<Process>>> =
-    spin::Lazy::new(|| spin::Mutex::new(VecDeque::new()));
+pub static PROCESSES: spin::Lazy<spin::RwLock<VecDeque<Process>>> =
+    spin::Lazy::new(|| spin::RwLock::new(VecDeque::new()));
 pub static CURRENT_PROCESS: AtomicU32 = AtomicU32::new(0);
 
 impl Process {
@@ -88,7 +88,7 @@ impl Process {
 
         let mut kernel_paging = crate::kernel_paging();
 
-        let mut userspace_paging = kernel_paging.make_userspace_paging(&[]);
+        let mut userspace_paging = kernel_paging.make_userspace_paging();
 
         let (userspace_address, userspace_stack, mapped_pages) =
             crate::elf::load(&mut userspace_paging, &mut kernel_paging, elf);
@@ -140,12 +140,13 @@ impl Process {
     }
 
     pub fn fork(&self) -> Process {
-        let paging = crate::kernel_paging().make_userspace_paging(&self.mapped_pages);
+        let mut kernel_paging = crate::kernel_paging();
+        let forked_paging = self.paging.fork(&mut kernel_paging, &self.mapped_pages);
 
         Process {
             pid: PID_FACTORY.next_pid(),
             state: self.state,
-            paging,
+            paging: forked_paging,
             cs: self.cs,
             ds: self.ds,
             flags: self.flags,
@@ -190,7 +191,7 @@ impl Drop for Process {
 }
 
 pub struct IndexedProcessGuard<'a> {
-    processes: spin::MutexGuard<'a, VecDeque<Process>>,
+    processes: spin::RwLockWriteGuard<'a, VecDeque<Process>>,
     index: usize,
 }
 
@@ -207,7 +208,7 @@ impl IndexedProcessGuard<'_> {
 pub fn current_process_mut() -> Result<IndexedProcessGuard<'static>, ()> {
     let pid = CURRENT_PROCESS.load(core::sync::atomic::Ordering::Relaxed);
 
-    let mut processes = PROCESSES.try_lock().ok_or(())?;
+    let mut processes = PROCESSES.try_write().ok_or(())?;
 
     Ok(processes
         .iter_mut()
@@ -218,7 +219,7 @@ pub fn current_process_mut() -> Result<IndexedProcessGuard<'static>, ()> {
 
 pub fn try_schedule() -> Option<!> {
     loop {
-        match PROCESSES.try_lock() {
+        match PROCESSES.try_write() {
             Some(mut processes) => {
                 processes.retain(|p| !matches!(p.state, State::Terminated(_)));
 

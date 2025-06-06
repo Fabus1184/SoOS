@@ -224,7 +224,7 @@ extern "C" fn irq_handler(
                             } else if key_event.state == pc_keyboard::KeyState::Down {
                                 if char.is_ascii() {
                                     for process in crate::process::PROCESSES
-                                        .try_lock()
+                                        .try_write()
                                         .expect("Failed to lock processes")
                                         .iter_mut()
                                     {

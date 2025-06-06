@@ -4,8 +4,6 @@ pub trait Write {
 
 #[derive(thiserror::Error, Debug)]
 pub enum WriteError {
-    #[error("Write operation failed due to insufficient space in the buffer")]
-    EndOfBuffer,
     #[error("Write operation failed due to an invalid offset")]
     InvalidOffset,
 }
@@ -26,10 +24,14 @@ impl<'a> Cursor<'a> {
 
 impl Write for Cursor<'_> {
     fn write(&mut self, buffer: &[u8]) -> Result<usize, WriteError> {
+        if buffer.len() == 0 {
+            return Ok(0);
+        }
+
         let len = buffer.len().min(self.buffer.len() - self.position);
 
         if len == 0 {
-            return Err(WriteError::EndOfBuffer);
+            return Ok(0);
         }
 
         self.buffer[self.position..self.position + len].copy_from_slice(&buffer[..len]);

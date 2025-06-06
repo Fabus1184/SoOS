@@ -43,4 +43,6 @@ run: $(LIMINE_FILES) $(LIMINE_BIN) build/iso-root $(KERNEL)
 
 	$(LIMINE_BIN) bios-install build/SoOS.iso
 
-	qemu-system-x86_64 -cpu qemu64,+la57 -cdrom build/SoOS.iso -d guest_errors,cpu_reset -m 8G -M smm=off -s -no-shutdown -no-reboot
+	qemu-system-x86_64 \
+		-cpu qemu64,+la57 -cdrom build/SoOS.iso -d guest_errors,cpu_reset -m 8G -M smm=off -s \
+		-no-shutdown -no-reboot

@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicUsize;
 
 use limine::request::FramebufferRequest;
 
-use crate::font::{self, FONT, FONT_HEIGHT, FONT_WIDTH};
+use crate::font::{self, FONT_HEIGHT, FONT_WIDTH};
 
 pub static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
 
@@ -12,7 +12,7 @@ pub static TERM: spin::Lazy<Term> = spin::Lazy::new(|| {
         .expect("Failed to get framebuffer!");
     let fb = fbr.framebuffers().next().expect("No framebuffers!");
 
-    Term::new(fb)
+    Term::new(&fb)
 });
 
 pub struct Term {
@@ -25,6 +25,7 @@ pub struct Term {
 pub struct Framebuffer {
     pub width: u64,
     pub height: u64,
+    pub pitch: u64,
     pub ptr: *mut u32,
 }
 
@@ -40,29 +41,17 @@ struct Performer {
 }
 
 impl Term {
-    pub fn new(framebuffer: limine::framebuffer::Framebuffer<'static>) -> Term {
+    pub fn new(framebuffer: &limine::framebuffer::Framebuffer<'static>) -> Term {
         Term {
             framebuffer: Framebuffer {
                 width: framebuffer.width(),
                 height: framebuffer.height(),
+                pitch: framebuffer.pitch() / 32,
                 ptr: framebuffer.addr().cast::<u32>(),
             },
             x: AtomicUsize::new(0),
             y: AtomicUsize::new(0),
         }
-    }
-
-    pub fn reset(&self) {
-        let performer = Performer {
-            x: 0,
-            y: 0,
-            fg: 0xFFFF_FFFF, // White
-            bg: 0xFF00_0000, // Black
-            framebuffer: self.framebuffer,
-        };
-        performer.clear();
-        self.x.store(0, core::sync::atomic::Ordering::Relaxed);
-        self.y.store(0, core::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn writer(&self) -> impl core::fmt::Write + '_ {

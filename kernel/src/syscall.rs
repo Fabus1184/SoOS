@@ -137,16 +137,21 @@ fn read(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
 
                 let mut buffer = vec![0; length];
 
-                let n = file
-                    .read(fd.offset, crate::io::Cursor::new(&mut buffer))
-                    .expect("Failed to read file");
+                let read_result = file.read(fd.offset, crate::io::Cursor::new(&mut buffer));
 
-                for i in 0..n {
-                    unsafe { ((dest + i) as *mut u8).write_volatile(buffer[i]) };
+                match read_result {
+                    Ok(n) => {
+                        for i in 0..n {
+                            unsafe { ((dest + i) as *mut u8).write_volatile(buffer[i]) };
+                        }
+                        fd.offset += n;
+                        process.registers.rax = n as u64; // Number of bytes read
+                    }
+                    Err(e) => {
+                        log::debug!("Failed to read from file descriptor {fd:?}: {e}");
+                        process.registers.rax = -1i64 as u64; // indicate error
+                    }
                 }
-
-                fd.offset += n;
-                process.registers.rax = n as u64;
             } else {
                 log::debug!("Invalid file descriptor: {}", fd);
                 process.registers.rax = -1i64 as u64; // indicate error
@@ -195,7 +200,7 @@ fn open(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
 
         process.registers.rax = fd.as_u64();
     } else {
-        log::debug!("File not found: {}", path_str);
+        log::debug!("File not found: {path_str}");
         process.registers.rax = -1i64 as u64; // indicate error
     }
 }
@@ -244,6 +249,11 @@ fn mmap(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
     };
     let page = Page::containing_address(x86_64::VirtAddr::new(address));
 
+    log::debug!(
+        "mmap process {}, address {address:#x}, page {page:?}",
+        process.pid()
+    );
+
     let mut kernel_paging = crate::kernel_paging();
     let phys_frame = kernel_paging
         .frame_allocator
@@ -280,6 +290,11 @@ fn munmap(process_lock: &mut crate::process::IndexedProcessGuard<'_>) {
 
     let address = process.registers.rbx;
     let page = Page::<Size4KiB>::containing_address(x86_64::VirtAddr::new(address));
+
+    log::debug!(
+        "munmap process {}, address {address:#x}, page {page:?}",
+        process.pid()
+    );
 
     match process.paging.page_table.unmap(page) {
         Ok((frame, flush)) => {

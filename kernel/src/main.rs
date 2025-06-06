@@ -31,6 +31,7 @@ use core::arch::asm;
 use limine::request::{HhdmRequest, MemoryMapRequest, PagingModeRequest};
 use log::{debug, info, LevelFilter};
 
+use ringbuffer::RingBuffer;
 use x86_64::{
     instructions::tables,
     registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
@@ -99,7 +100,7 @@ unsafe extern "C" fn _start() -> ! {
 
 #[no_mangle]
 unsafe extern "C" fn main() -> ! {
-    kernel::logger::init(LevelFilter::Debug);
+    kernel::logger::KERNEL_LOGGER.init(LevelFilter::Debug);
 
     static mut TSS: TaskStateSegment = TaskStateSegment::new();
     TSS.privilege_stack_table = [
@@ -157,9 +158,10 @@ unsafe extern "C" fn main() -> ! {
     {
         let fb = &term::TERM.framebuffer;
         log::debug!(
-            "framebuffer {}x{} at {:#x}",
+            "framebuffer {}x{} (pitch {}) at {:#x}",
             fb.width,
             fb.height,
+            fb.pitch,
             fb.ptr as u64
         );
     }
@@ -199,7 +201,7 @@ unsafe extern "C" fn main() -> ! {
                 Page::containing_address(VirtAddr::new(*KERNEL_MEMORY_START_ADDR)),
                 Page::containing_address(VirtAddr::new(*KERNEL_MEMORY_END_ADDR)),
             )
-            .chain(Page::range(
+            .chain(Page::range_inclusive(
                 Page::containing_address(VirtAddr::new(term::TERM.framebuffer.ptr as u64)),
                 Page::containing_address(VirtAddr::new(
                     term::TERM.framebuffer.ptr as u64
@@ -224,6 +226,8 @@ unsafe extern "C" fn main() -> ! {
         kernel::allocator::init_kernel_heap(KERNEL_HEAP.as_mut_ptr(), KERNEL_HEAP_SIZE);
     }
 
+    kernel::logger::KERNEL_LOGGER.init_ringbuffer();
+
     i8253::TIMER0.init(
         10,
         i8253::Channel::CH0,
@@ -244,7 +248,8 @@ unsafe extern "C" fn main() -> ! {
 
     {
         process::PROCESSES
-            .lock()
+            .try_write()
+            .expect("Failed to lock processes")
             .push_back(process::Process::user_from_elf(
                 ucs,
                 uds,
@@ -257,6 +262,52 @@ unsafe extern "C" fn main() -> ! {
         let mut fs = FILE_SYSTEM.lock();
         debug!("VFS: ");
         fs.create_file("/home/test", vfs::File::regular(b"Hello World!"));
+        fs.create_file(
+            "/var/log",
+            vfs::File::Special {
+                read: |_, offset, writer| {
+                    let mut written = 0;
+                    let ringbuffer = kernel::logger::KERNEL_LOGGER.lock_ringbuffer();
+                    for byte in ringbuffer.iter().skip(offset) {
+                        written += writer.write(&[*byte])?;
+                    }
+
+                    Ok(written)
+                },
+                write: |_, _, _| panic!("Not implemented!"),
+            },
+        );
+        fs.create_file(
+            "/proc/list",
+            vfs::File::special(
+                |_self, offset, writer| {
+                    if offset != 0 {
+                        return Err(crate::io::WriteError::InvalidOffset);
+                    }
+
+                    let mut written = 0;
+
+                    for process in process::PROCESSES
+                        .try_read()
+                        .expect("Failed to lock processes")
+                        .iter()
+                    {
+                        let line = alloc::format!(
+                            "pid {} state {:?} rip {:#x}\n",
+                            process.pid(),
+                            process.state,
+                            process.rip
+                        );
+
+                        writer.write(line.as_bytes())?;
+                        written += line.len();
+                    }
+
+                    Ok(written)
+                },
+                |_, _, _| panic!("Not implemented!"),
+            ),
+        );
         fs.create_file(
             "/proc/pci/devices",
             vfs::File::special(

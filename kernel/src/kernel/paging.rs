@@ -316,10 +316,7 @@ impl KernelPaging {
         }
     }
 
-    pub fn make_userspace_paging(
-        &mut self,
-        extra_pages: &[(Page, PageTableFlags)],
-    ) -> UserspacePaging<'static> {
+    pub fn make_userspace_paging(&mut self) -> UserspacePaging<'static> {
         let new_pagetable = self
             .frame_allocator
             .allocate_frame()
@@ -333,90 +330,10 @@ impl KernelPaging {
             .level_4_table()
             .clone_into(unsafe { &mut *new_pagetable_ptr });
 
-        let mut offset_page_table =
+        let page_table =
             unsafe { OffsetPageTable::new(&mut *new_pagetable_ptr, self.page_table.phys_offset()) };
 
-        for &(page, flags) in extra_pages {
-            let new_frame = self
-                .frame_allocator
-                .allocate_frame()
-                .expect("Failed to allocate frame for cloned page table");
-
-            log::debug!(
-                "Cloning page {:#x} to new frame",
-                page.start_address().as_u64(),
-            );
-
-            unsafe {
-                offset_page_table
-                    .map_to(page, new_frame, flags, &mut self.frame_allocator)
-                    .expect("Failed to map frame in cloned page table")
-                    .flush();
-            };
-
-            // find free address to map the old and new frames
-            let virt_addr = VirtAddr::new(0x77CC_BBBB_C000);
-
-            let old_frame = self
-                .page_table
-                .translate_page(page)
-                .expect("Failed to translate page")
-                .start_address();
-
-            // map old and new frames to temporary pages
-            unsafe {
-                self.page_table
-                    .map_to(
-                        Page::<Size4KiB>::containing_address(virt_addr),
-                        PhysFrame::containing_address(old_frame),
-                        PageTableFlags::PRESENT,
-                        &mut self.frame_allocator,
-                    )
-                    .expect("Failed to map frame in cloned page table")
-                    .flush();
-
-                self.page_table
-                    .map_to(
-                        Page::containing_address(virt_addr + 0x1000),
-                        new_frame,
-                        PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
-                        &mut self.frame_allocator,
-                    )
-                    .expect("Failed to map frame in cloned page table")
-                    .flush();
-            };
-
-            // copy the data
-            for i in 0..0x1000 {
-                let old_byte = unsafe { (virt_addr + i).as_ptr::<u8>().read_volatile() };
-                unsafe {
-                    (virt_addr + 0x1000 + i)
-                        .as_mut_ptr::<u8>()
-                        .write_volatile(old_byte);
-                }
-            }
-
-            // unmap the temporary pages
-            unsafe {
-                let (frame, flush) = self
-                    .page_table
-                    .unmap(Page::<Size4KiB>::containing_address(virt_addr))
-                    .expect("Failed to unmap old frame in cloned page table");
-                self.frame_allocator.deallocate_frame(frame);
-                flush.flush();
-
-                let (frame, flush) = self
-                    .page_table
-                    .unmap(Page::<Size4KiB>::containing_address(virt_addr + 0x1000))
-                    .expect("Failed to unmap new frame in cloned page table");
-                self.frame_allocator.deallocate_frame(frame);
-                flush.flush();
-            }
-        }
-
-        UserspacePaging {
-            page_table: offset_page_table,
-        }
+        UserspacePaging { page_table }
     }
 }
 
@@ -442,6 +359,112 @@ impl UserspacePaging<'_> {
                 PhysFrame::containing_address(physical_address),
                 Cr3Flags::empty(),
             );
+        }
+    }
+
+    pub fn fork(
+        &self,
+        kernel_paging: &mut KernelPaging,
+        extra_pages: &[(Page, PageTableFlags)],
+    ) -> UserspacePaging<'static> {
+        let new_pagetable = kernel_paging
+            .frame_allocator
+            .allocate_frame()
+            .expect("Failed to allocate frame!");
+
+        let new_pagetable_ptr = (self.page_table.phys_offset().as_u64()
+            + new_pagetable.start_address().as_u64())
+            as *mut PageTable;
+
+        self.page_table
+            .level_4_table()
+            .clone_into(unsafe { &mut *new_pagetable_ptr });
+
+        let mut new_page_table =
+            unsafe { OffsetPageTable::new(&mut *new_pagetable_ptr, self.page_table.phys_offset()) };
+
+        for &(page, flags) in extra_pages {
+            let new_frame = kernel_paging
+                .frame_allocator
+                .allocate_frame()
+                .expect("Failed to allocate frame for cloned page table");
+
+            log::debug!(
+                "Cloning page {:#x} to new frame",
+                page.start_address().as_u64(),
+            );
+
+            unsafe {
+                new_page_table
+                    .map_to(page, new_frame, flags, &mut kernel_paging.frame_allocator)
+                    .expect("Failed to map frame in cloned page table")
+                    .flush();
+            };
+
+            // find free address to map the old and new frames
+            let virt_addr = VirtAddr::new(0x8888_0000_0000);
+
+            let old_frame = self
+                .page_table
+                .translate_page(page)
+                .expect("Failed to translate page")
+                .start_address();
+
+            // map old and new frames to temporary pages
+            unsafe {
+                kernel_paging
+                    .page_table
+                    .map_to(
+                        Page::<Size4KiB>::containing_address(virt_addr),
+                        PhysFrame::containing_address(old_frame),
+                        PageTableFlags::PRESENT,
+                        &mut kernel_paging.frame_allocator,
+                    )
+                    .expect("Failed to map frame in cloned page table")
+                    .flush();
+
+                kernel_paging
+                    .page_table
+                    .map_to(
+                        Page::containing_address(virt_addr + 0x1000),
+                        new_frame,
+                        PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
+                        &mut kernel_paging.frame_allocator,
+                    )
+                    .expect("Failed to map frame in cloned page table")
+                    .flush();
+            };
+
+            // copy the data
+            for i in 0..0x1000 {
+                let old_byte = unsafe { (virt_addr + i).as_ptr::<u8>().read_volatile() };
+                unsafe {
+                    (virt_addr + 0x1000 + i)
+                        .as_mut_ptr::<u8>()
+                        .write_volatile(old_byte);
+                }
+            }
+
+            // unmap the temporary pages
+            unsafe {
+                let (frame, flush) = kernel_paging
+                    .page_table
+                    .unmap(Page::<Size4KiB>::containing_address(virt_addr))
+                    .expect("Failed to unmap old frame in cloned page table");
+                kernel_paging.frame_allocator.deallocate_frame(frame);
+                flush.flush();
+
+                let (frame, flush) = kernel_paging
+                    .page_table
+                    .unmap(Page::<Size4KiB>::containing_address(virt_addr + 0x1000))
+                    .expect("Failed to unmap new frame in cloned page table");
+                kernel_paging.frame_allocator.deallocate_frame(frame);
+                flush.flush();
+            }
+        }
+
+        UserspacePaging {
+            page_table: new_page_table,
         }
     }
 }
