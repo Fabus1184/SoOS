@@ -1,23 +1,20 @@
 use elf_rs::{Elf, ElfFile, ProgramHeaderFlags, ProgramType};
 use log::info;
 use x86_64::{
-    structures::paging::{
-        FrameAllocator, FrameDeallocator, Mapper, Page, PageSize, PageTableFlags, Size4KiB,
-    },
+    structures::paging::{FrameAllocator, Mapper, Page, PageSize, PageTableFlags, Size4KiB},
     VirtAddr,
 };
 
-use crate::kernel::paging::{KernelPaging, UserspacePaging};
+use crate::{
+    kernel::paging::{KernelPaging, UserspacePaging},
+    process::MappedPage,
+};
 
 pub fn load(
     process_paging: &mut UserspacePaging,
     kernel_paging: &mut KernelPaging,
     bytes: &[u8],
-) -> (
-    VirtAddr,
-    VirtAddr,
-    alloc::vec::Vec<(x86_64::structures::paging::Page, PageTableFlags)>,
-) {
+) -> (VirtAddr, VirtAddr, alloc::vec::Vec<MappedPage>) {
     let elf = Elf::from_bytes(bytes).expect("Failed to parse ELF!");
     match elf.elf_header().elftype() {
         elf_rs::ElfType::ET_EXEC => {}
@@ -51,7 +48,11 @@ pub fn load(
 
         // map page for copying program
         for page in Page::range_inclusive(start_page, end_page) {
-            pages.push((page, flags));
+            pages.push(MappedPage {
+                name: "elf",
+                page,
+                flags,
+            });
 
             let frame = kernel_paging
                 .frame_allocator
@@ -137,7 +138,11 @@ pub fn load(
                 .flush();
         }
 
-        pages.push((page, flags));
+        pages.push(MappedPage {
+            name: "stack",
+            page,
+            flags,
+        });
     }
 
     let stack_pointer = stack_address + stack_size_pages * Size4KiB::SIZE;

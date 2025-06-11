@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicUsize;
 
 use limine::request::FramebufferRequest;
 
-use crate::font::{self, FONT_HEIGHT, FONT_WIDTH};
+use crate::font::FONT;
 
 pub static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
 
@@ -123,45 +123,61 @@ impl Performer {
     }
 
     fn print_char(&mut self, c: char) {
-        let font_scale: u64 = 2;
+        let font_scale: u64 = 1;
 
-        if self.x >= self.framebuffer.width as usize / FONT_WIDTH * font_scale as usize {
+        if self.x >= (self.framebuffer.width * font_scale / u64::from(FONT.tile_size.0)) as usize {
             self.x = 0;
             self.y += 1;
         }
 
-        if self.y >= self.framebuffer.height as usize / FONT_HEIGHT * font_scale as usize {
+        if self.y >= (self.framebuffer.height * font_scale / u64::from(FONT.tile_size.1)) as usize {
             // If no lines remain, scroll the screen
             self.scroll();
-            self.y = self.y.saturating_sub(2);
+            self.y = self.y.saturating_sub(
+                1 + self.y
+                    - (self.framebuffer.height * font_scale / u64::from(FONT.tile_size.1)) as usize,
+            );
         }
 
         if c == '\0' {
             return;
         } else if c == ' ' {
-            let x_off = (self.x * FONT_WIDTH) as u64 / font_scale;
-            let y_off = (self.y * FONT_HEIGHT) as u64 / font_scale;
-            for x in 0..FONT_WIDTH {
-                for y in 0..FONT_HEIGHT {
+            let x_off = (self.x * FONT.tile_size.0 as usize) as u64 / font_scale;
+            let y_off = (self.y * FONT.tile_size.1 as usize) as u64 / font_scale;
+            for x in 0..FONT.tile_size.0 {
+                for y in 0..FONT.tile_size.1 {
                     self.blit(
-                        x_off + x as u64 / font_scale,
-                        y_off + y as u64 / font_scale,
+                        x_off + u64::from(x) / font_scale,
+                        y_off + u64::from(y) / font_scale,
                         self.bg,
                     );
                 }
             }
         } else if c.is_ascii_graphic() {
-            let x_off = (self.x * FONT_WIDTH) as u64 / font_scale;
-            let y_off = (self.y * FONT_HEIGHT) as u64 / font_scale;
+            let x_off = (self.x * FONT.tile_size.0 as usize) as u64 / font_scale;
+            let y_off = (self.y * FONT.tile_size.1 as usize) as u64 / font_scale;
 
-            for x in 0..FONT_WIDTH {
-                for y in 0..FONT_HEIGHT {
-                    let byte = font::FONT[c as usize - 32][FONT_WIDTH * (y / 8) + x];
-                    let bit = (byte >> (y % 8)) & 1;
-                    let color = if bit == 1 { self.fg } else { self.bg };
+            for x in 0..FONT.tile_size.0 {
+                for y in 0..FONT.tile_size.1 {
+                    let value = FONT.get_pixel(c, x, y);
+                    // lerp between fg and bg based on alpha
+                    let color = match value {
+                        Some(alpha) => {
+                            let alpha = u32::from(alpha);
+                            let fg = self.fg & 0x00FF_FFFF; // Mask to RGB
+                            let bg = self.bg & 0x00FF_FFFF; // Mask to RGB
+                            let r = ((fg >> 16) * alpha + (bg >> 16) * (255 - alpha)) / 255;
+                            let g =
+                                ((fg >> 8 & 0xFF) * alpha + (bg >> 8 & 0xFF) * (255 - alpha)) / 255;
+                            let b = ((fg & 0xFF) * alpha + (bg & 0xFF) * (255 - alpha)) / 255;
+                            (r << 16) | (g << 8) | b | 0xFF00_0000 // Add full opacity
+                        }
+                        None => self.bg,
+                    };
+
                     self.blit(
-                        x_off + x as u64 / font_scale,
-                        y_off + y as u64 / font_scale,
+                        x_off + u64::from(x) / font_scale,
+                        y_off + u64::from(y) / font_scale,
                         color,
                     );
                 }
@@ -176,18 +192,19 @@ impl Performer {
             core::ptr::copy(
                 self.framebuffer
                     .ptr
-                    .add(self.framebuffer.width as usize * FONT_HEIGHT),
+                    .add(self.framebuffer.width as usize * FONT.tile_size.1 as usize),
                 self.framebuffer.ptr,
-                (self.framebuffer.height as usize - FONT_HEIGHT) * self.framebuffer.width as usize,
+                (self.framebuffer.height as usize - FONT.tile_size.1 as usize)
+                    * self.framebuffer.width as usize,
             );
         }
 
         // Clear the last line
         for x in 0..self.framebuffer.width {
-            for y in 0..FONT_HEIGHT {
+            for y in 0..FONT.tile_size.1 {
                 self.blit(
                     x,
-                    self.framebuffer.height - FONT_HEIGHT as u64 + y as u64,
+                    self.framebuffer.height - u64::from(FONT.tile_size.1) + u64::from(y),
                     self.bg,
                 );
             }

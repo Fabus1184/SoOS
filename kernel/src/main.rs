@@ -31,7 +31,6 @@ use core::arch::asm;
 use limine::request::{HhdmRequest, MemoryMapRequest, PagingModeRequest};
 use log::{debug, info, LevelFilter};
 
-use ringbuffer::RingBuffer;
 use x86_64::{
     instructions::tables,
     registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
@@ -210,10 +209,10 @@ unsafe extern "C" fn main() -> ! {
             ))
             .chain(Page::range(
                 Page::containing_address(VirtAddr::new(
-                    kernel::paging::KERNEL_FRAME_MAPPING_ADDRESS,
+                    kernel::paging::KERNEL_FRAME_MAPPING_ADDRESS, // 0x7776_0000_0000,
                 )),
                 Page::containing_address(VirtAddr::new(
-                    kernel::paging::KERNEL_FRAME_MAPPING_ADDRESS + (1 << 20) * 0x1000,
+                    kernel::paging::KERNEL_FRAME_MAPPING_ADDRESS + 0x10_0000, //
                 )),
             )),
         ))
@@ -247,105 +246,19 @@ unsafe extern "C" fn main() -> ! {
         });
 
     {
-        process::PROCESSES
-            .try_write()
-            .expect("Failed to lock processes")
-            .push_back(process::Process::user_from_elf(
-                ucs,
-                uds,
-                0x202,
-                include_bytes_aligned::include_bytes_aligned!(32, "../../build/userspace/bin/sosh"),
-            ));
+        vfs::root::init_fs(&mut FILE_SYSTEM.lock());
     }
 
-    {
-        let mut fs = FILE_SYSTEM.lock();
-        debug!("VFS: ");
-        fs.create_file("/home/test", vfs::File::regular(b"Hello World!"));
-        fs.create_file(
-            "/var/log",
-            vfs::File::Special {
-                read: |_, offset, writer| {
-                    let mut written = 0;
-                    let ringbuffer = kernel::logger::KERNEL_LOGGER.lock_ringbuffer();
-                    for byte in ringbuffer.iter().skip(offset) {
-                        written += writer.write(&[*byte])?;
-                    }
-
-                    Ok(written)
-                },
-                write: |_, _, _| panic!("Not implemented!"),
-            },
-        );
-        fs.create_file(
-            "/proc/list",
-            vfs::File::special(
-                |_self, offset, writer| {
-                    if offset != 0 {
-                        return Err(crate::io::WriteError::InvalidOffset);
-                    }
-
-                    let mut written = 0;
-
-                    for process in process::PROCESSES
-                        .try_read()
-                        .expect("Failed to lock processes")
-                        .iter()
-                    {
-                        let line = alloc::format!(
-                            "pid {} state {:?} rip {:#x}\n",
-                            process.pid(),
-                            process.state,
-                            process.rip
-                        );
-
-                        writer.write(line.as_bytes())?;
-                        written += line.len();
-                    }
-
-                    Ok(written)
-                },
-                |_, _, _| panic!("Not implemented!"),
-            ),
-        );
-        fs.create_file(
-            "/proc/pci/devices",
-            vfs::File::special(
-                |_self, offset, writer| {
-                    if offset != 0 {
-                        return Err(crate::io::WriteError::InvalidOffset);
-                    }
-
-                    let mut written = 0;
-
-                    for dev in driver::pci::scan().expect("Failed to scan PCI devices!") {
-                        let line = alloc::format!(
-                            "bus {} device {} function {} class {:?}\n",
-                            dev.bus,
-                            dev.device,
-                            dev.function,
-                            dev.header.class
-                        );
-
-                        writer.write(line.as_bytes())?;
-                        written += line.len();
-                    }
-
-                    writer.write(b"test\n")?;
-
-                    Ok(written)
-                },
-                |_, _, _| panic!("Not implemented!"),
-            ),
-        );
-        fs.print();
-    }
+    process::PROCESSES.add_process(process::Process::user_from_elf(
+        ucs,
+        uds,
+        0x202,
+        include_bytes_aligned::include_bytes_aligned!(32, "../../build/userspace/bin/sosh"),
+    ));
 
     log::info!("kernel initialization complete, starting scheduler");
 
-    process::try_schedule().unwrap_or_else(|| {
-        panic!("No process ready to run!");
-    });
+    process::schedule();
 }
 
 extern "C" {

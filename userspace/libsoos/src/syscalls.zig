@@ -9,6 +9,7 @@ const syscall = enum(u64) {
     close = 7,
     mmap = 8,
     munmap = 9,
+    execve = 10,
 };
 
 pub fn print(str: []const u8) void {
@@ -143,4 +144,42 @@ pub fn munmap(ptr: *anyopaque) void {
           [ptr] "{rbx}" (ptr),
         : "rax", "rbx"
     );
+}
+
+pub fn execve(path: []const u8, argv: []const []const u8) !noreturn {
+    var result: u64 = 0;
+
+    if (argv.len > 64) {
+        return error.TooManyArguments;
+    }
+
+    // Prepare the argv array as length-prefixed strings
+    const Arg = struct {
+        len: u64,
+        ptr: [*]const u8,
+    };
+
+    var argv_array: [64]Arg = undefined;
+    for (argv, 0..) |arg, i| {
+        argv_array[i] = Arg{
+            .ptr = arg.ptr,
+            .len = @intCast(arg.len),
+        };
+    }
+
+    asm volatile ("int $0x80"
+        : [result] "={rax}" (result),
+        : [i] "{rax}" (@intFromEnum(syscall.execve)),
+          [path] "{rbx}" (path.ptr),
+          [path_len] "{rcx}" (path.len),
+          [argv_len] "{rdx}" (argv.len),
+          [argv_array] "{r8}" (@as(*const anyopaque, &argv_array)),
+        : "rax", "rbx", "rcx", "rdx", "r8"
+    );
+
+    if (result != 0) {
+        return error.ExecveFailed;
+    } else {
+        unreachable; // should not return
+    }
 }

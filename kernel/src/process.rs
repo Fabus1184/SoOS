@@ -1,7 +1,7 @@
-use core::sync::atomic::AtomicU32;
+use core::{cell::RefCell, sync::atomic::AtomicU32};
 
 use alloc::{collections::vec_deque::VecDeque, vec::Vec};
-use x86_64::structures::paging::{Mapper, Translate};
+use x86_64::structures::paging::{FrameDeallocator, Mapper};
 
 use crate::kernel::paging::UserspacePaging;
 
@@ -31,6 +31,13 @@ pub enum State {
     Terminated(u64),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MappedPage {
+    pub name: &'static str,
+    pub page: x86_64::structures::paging::Page,
+    pub flags: x86_64::structures::paging::PageTableFlags,
+}
+
 pub struct Process {
     pid: u32,
     pub state: State,
@@ -41,10 +48,7 @@ pub struct Process {
     pub rip: u64,
     pub registers: crate::idt::GPRegisters,
     pub stdin: alloc::collections::VecDeque<u8>,
-    pub mapped_pages: Vec<(
-        x86_64::structures::paging::Page,
-        x86_64::structures::paging::PageTableFlags,
-    )>,
+    pub mapped_pages: Vec<MappedPage>,
     file_descriptors: alloc::collections::BTreeMap<FileDescriptor, ProcessFileDescriptor>,
 }
 
@@ -71,9 +75,94 @@ impl FileDescriptor {
     }
 }
 
-pub static PROCESSES: spin::Lazy<spin::RwLock<VecDeque<Process>>> =
-    spin::Lazy::new(|| spin::RwLock::new(VecDeque::new()));
-pub static CURRENT_PROCESS: AtomicU32 = AtomicU32::new(0);
+pub struct Processes {
+    processes: RefCell<VecDeque<Process>>,
+    current_pid: AtomicU32,
+}
+
+impl Processes {
+    pub fn process(&self, pid: u32) -> impl core::ops::Deref<Target = Process> + '_ {
+        core::cell::Ref::map(self.processes.borrow(), |processes| {
+            processes
+                .iter()
+                .find(|p| p.pid == pid)
+                .expect("Process not found")
+        })
+    }
+
+    pub fn process_mut(&self, pid: u32) -> impl core::ops::DerefMut<Target = Process> + '_ {
+        core::cell::RefMut::map(self.processes.borrow_mut(), |processes| {
+            processes
+                .iter_mut()
+                .find(|p| p.pid == pid)
+                .expect("Process not found")
+        })
+    }
+
+    pub fn with_process<F, R>(&self, pid: u32, f: F) -> R
+    where
+        F: FnOnce(&Process) -> R,
+    {
+        let processes = self.processes.borrow();
+        processes
+            .iter()
+            .find(|p| p.pid == pid)
+            .map(f)
+            .expect("Process not found")
+    }
+
+    pub fn with_process_mut<F, R>(&self, pid: u32, f: F) -> R
+    where
+        F: FnOnce(&mut Process) -> R,
+    {
+        let mut processes = self.processes.borrow_mut();
+        processes
+            .iter_mut()
+            .find(|p| p.pid == pid)
+            .map(f)
+            .expect("Process not found")
+    }
+
+    pub fn processes(&self) -> core::cell::Ref<'_, VecDeque<Process>> {
+        self.processes.borrow()
+    }
+
+    pub fn processes_mut(&self) -> core::cell::RefMut<'_, VecDeque<Process>> {
+        self.processes.borrow_mut()
+    }
+
+    pub fn current(&self) -> core::cell::Ref<'_, Process> {
+        let pid = self.current_pid.load(core::sync::atomic::Ordering::Relaxed);
+
+        core::cell::Ref::map(self.processes(), |processes| {
+            processes
+                .iter()
+                .find(|p| p.pid == pid)
+                .expect("Current process not found")
+        })
+    }
+
+    pub fn current_mut(&self) -> core::cell::RefMut<'_, Process> {
+        let pid = self.current_pid.load(core::sync::atomic::Ordering::Relaxed);
+
+        core::cell::RefMut::map(self.processes_mut(), |processes| {
+            processes
+                .iter_mut()
+                .find(|p| p.pid == pid)
+                .expect("Current process not found")
+        })
+    }
+
+    pub fn add_process(&self, process: Process) {
+        self.processes.borrow_mut().push_back(process);
+    }
+}
+unsafe impl Sync for Processes {}
+
+pub static PROCESSES: Processes = Processes {
+    processes: RefCell::new(VecDeque::new()),
+    current_pid: AtomicU32::new(0),
+};
 
 impl Process {
     pub fn user_from_elf(
@@ -113,22 +202,62 @@ impl Process {
         }
     }
 
+    pub fn execve(&mut self, elf: &[u8]) {
+        log::debug!("execve for pid {}", self.pid);
+
+        let mut kernel_paging = crate::kernel_paging();
+
+        for page in &self.mapped_pages {
+            let (frame, flush) = self
+                .paging
+                .page_table
+                .unmap(page.page)
+                .expect("Failed to unmap page");
+            flush.flush();
+            unsafe {
+                kernel_paging.frame_allocator.deallocate_frame(frame);
+            }
+        }
+
+        let (userspace_address, userspace_stack, mapped_pages) =
+            crate::elf::load(&mut self.paging, &mut kernel_paging, elf);
+
+        log::debug!(
+            "elf for pid {} loaded at address {:#x}, stack at {:#x}",
+            self.pid,
+            userspace_address.as_u64(),
+            userspace_stack.as_u64()
+        );
+
+        self.rip = userspace_address.as_u64();
+        self.registers = crate::idt::GPRegisters {
+            rsp: userspace_stack.as_u64(),
+            ..Default::default()
+        };
+        self.mapped_pages = mapped_pages;
+    }
+
     pub fn pid(&self) -> u32 {
         self.pid
     }
 
-    fn update_state(process_lock: &mut IndexedProcessGuard<'_>) {
-        match process_lock.get().state {
+    fn update_state(pid: u32) {
+        let mut process = PROCESSES.process_mut(pid);
+
+        match process.state {
             State::Sleeping(target) => {
                 let ticks = unsafe { crate::i8253::TIMER0.ticks() };
                 if ticks >= target {
-                    process_lock.get().state = State::Ready;
+                    process.state = State::Ready;
                 }
             }
             State::WaitingForStdin => {
-                if !process_lock.get().stdin.is_empty() {
-                    crate::syscall::handle_syscall(process_lock);
-                    process_lock.get().state = State::Ready;
+                if !process.stdin.is_empty() {
+                    drop(process);
+
+                    crate::syscall::handle_syscall(pid);
+
+                    PROCESSES.process_mut(pid).state = State::Ready;
                 }
             }
             _ => {}
@@ -170,6 +299,10 @@ impl Process {
         self.file_descriptors.remove(&fd)
     }
 
+    pub fn file_descriptor(&self, fd: FileDescriptor) -> Option<&ProcessFileDescriptor> {
+        self.file_descriptors.get(&fd)
+    }
+
     pub fn file_descriptor_mut(
         &mut self,
         fd: FileDescriptor,
@@ -180,102 +313,85 @@ impl Process {
 
 impl Drop for Process {
     fn drop(&mut self) {
-        for &(page, _flags) in &self.mapped_pages {
-            self.paging
+        let mut kernel_paging = crate::kernel_paging();
+
+        for &MappedPage { page, .. } in &self.mapped_pages {
+            let (frame, flush) = self
+                .paging
                 .page_table
                 .unmap(page)
-                .expect("Failed to unmap page")
-                .1
-                .flush();
-        }
-    }
-}
+                .expect("Failed to unmap page");
 
-pub struct IndexedProcessGuard<'a> {
-    processes: spin::RwLockWriteGuard<'a, VecDeque<Process>>,
-    index: usize,
-}
+            flush.flush();
 
-impl IndexedProcessGuard<'_> {
-    pub fn get(&mut self) -> &mut Process {
-        &mut self.processes[self.index]
-    }
-
-    pub fn get_processes(&mut self) -> &mut VecDeque<Process> {
-        &mut self.processes
-    }
-}
-
-pub fn current_process_mut() -> Result<IndexedProcessGuard<'static>, ()> {
-    let pid = CURRENT_PROCESS.load(core::sync::atomic::Ordering::Relaxed);
-
-    let mut processes = PROCESSES.try_write().ok_or(())?;
-
-    Ok(processes
-        .iter_mut()
-        .position(|p| p.pid == pid)
-        .map(|index| IndexedProcessGuard { processes, index })
-        .expect("Current process not found"))
-}
-
-pub fn try_schedule() -> Option<!> {
-    loop {
-        match PROCESSES.try_write() {
-            Some(mut processes) => {
-                processes.retain(|p| !matches!(p.state, State::Terminated(_)));
-
-                if processes.len() == 0 {
-                    log::error!("No user processes left, halting forever!. Goodbye!");
-                    x86_64::instructions::interrupts::disable();
-                    x86_64::instructions::hlt();
-                }
-
-                let len = processes.len();
-                let mut lock = IndexedProcessGuard {
-                    processes,
-                    index: 0,
-                };
-                for index in 0..len {
-                    lock.index = index;
-                    Process::update_state(&mut lock);
-                }
-
-                let mut processes = lock.processes;
-
-                // rotate through processes until we find one that is ready
-                for _ in 0..processes.len() {
-                    let process = processes.front_mut().expect("No processes left!");
-
-                    if process.state == State::Ready {
-                        log::trace!("Scheduling {}", process.pid);
-
-                        CURRENT_PROCESS.store(process.pid, core::sync::atomic::Ordering::Relaxed);
-
-                        let cs = process.cs.0 as u64;
-                        let ds = process.ds.0 as u64;
-                        let flags = process.flags;
-                        let rip = process.rip;
-                        let registers = process.registers;
-
-                        x86_64::instructions::interrupts::disable();
-                        process.load_paging();
-
-                        processes.rotate_left(1);
-                        drop(processes);
-
-                        unsafe {
-                            crate::do_iret(cs, ds, flags, rip, &raw const registers);
-                        };
-                    } else {
-                        processes.rotate_left(1);
-                    }
-                }
-
-                drop(processes);
-                x86_64::instructions::interrupts::enable_and_hlt();
-                x86_64::instructions::interrupts::disable();
+            unsafe {
+                kernel_paging.frame_allocator.deallocate_frame(frame);
             }
-            None => return None,
         }
+    }
+}
+
+pub fn schedule() -> ! {
+    loop {
+        x86_64::instructions::interrupts::disable();
+        log::trace!("scheduling...");
+
+        let mut processes = PROCESSES.processes_mut();
+
+        processes.retain(|p| !matches!(p.state, State::Terminated(_)));
+
+        if processes.is_empty() {
+            log::error!("No user processes left, halting forever!. Goodbye!");
+            x86_64::instructions::interrupts::disable();
+            x86_64::instructions::hlt();
+        }
+
+        let len = processes.len();
+        drop(processes);
+
+        for i in 0..len {
+            let pid = PROCESSES.processes().get(i).expect("Process not found").pid;
+            Process::update_state(pid);
+        }
+
+        let mut processes = PROCESSES.processes_mut();
+
+        // rotate through processes until we find one that is ready
+        for _ in 0..processes.len() {
+            let process = processes.front_mut().expect("No processes left!");
+
+            if process.state == State::Ready {
+                log::trace!("scheduling {}", process.pid);
+
+                PROCESSES
+                    .current_pid
+                    .store(process.pid, core::sync::atomic::Ordering::Relaxed);
+
+                let cs = u64::from(process.cs.0);
+                let ds = u64::from(process.ds.0);
+                let flags = process.flags;
+                let rip = process.rip;
+                let registers = process.registers;
+
+                x86_64::instructions::interrupts::disable();
+                process.load_paging();
+
+                processes.rotate_left(1);
+                drop(processes);
+
+                unsafe {
+                    crate::do_iret(cs, ds, flags, rip, &raw const registers);
+                };
+            } else {
+                processes.rotate_left(1);
+            }
+        }
+
+        drop(processes);
+
+        log::trace!("no ready processes found, sleeping...");
+
+        x86_64::instructions::interrupts::enable();
+        x86_64::instructions::hlt();
     }
 }

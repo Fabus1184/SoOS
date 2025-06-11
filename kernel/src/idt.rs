@@ -11,7 +11,7 @@ use x86_64::{
 
 use crate::{
     driver::{self},
-    process,
+    process::{self, PROCESSES},
     syscall::handle_syscall,
 };
 
@@ -78,10 +78,6 @@ pub fn load_idt() {
     }
 }
 
-extern "x86-interrupt" fn other_handler(stack_frame: InterruptStackFrame) {
-    panic!("Unhandled interrupt: {:#?}", stack_frame);
-}
-
 extern "C" {
     fn syscall_handler_asm_stub();
     fn irq0();
@@ -134,9 +130,11 @@ pub unsafe extern "C" fn syscall_handler(
     registers: GPRegisters,
     stack_frame: InterruptStackFrame,
 ) {
-    let mut process_lock =
-        crate::process::current_process_mut().expect("failed to get current process");
-    let process = process_lock.get();
+    trace!(
+        "syscall_handler: stack_frame {stack_frame:0x?}, registers {registers:0x?}"
+    );
+
+    let mut process = PROCESSES.current_mut();
 
     process.flags = stack_frame.cpu_flags.bits();
     process.rip = stack_frame.instruction_pointer.as_u64();
@@ -144,12 +142,14 @@ pub unsafe extern "C" fn syscall_handler(
         rsp: stack_frame.stack_pointer.as_u64(),
         ..registers
     };
+    
+    let pid = process.pid();
 
-    handle_syscall(&mut process_lock);
+    drop(process);
 
-    drop(process_lock);
+    handle_syscall(pid);
 
-    crate::process::try_schedule().expect("Failed to schedule a process");
+    crate::process::schedule();
 }
 
 #[no_mangle]
@@ -164,12 +164,7 @@ extern "C" fn irq_handler(
     irq: u8,
     stack_frame: InterruptStackFrame,
 ) {
-    trace!(
-        "irq_handler begin: irq {:0x?}, stack_frame {:0x?}, registers {:0x?}",
-        irq,
-        stack_frame,
-        registers
-    );
+    trace!("irq_handler begin: irq {irq:0x?}, stack_frame {stack_frame:0x?}, registers {registers:0x?}");
 
     match irq {
         0 => unsafe {
@@ -178,7 +173,7 @@ extern "C" fn irq_handler(
         },
         1 => unsafe {
             let scancode: u8 = PortRead::read_from_port(0x60);
-            trace!("scancode: {}", scancode);
+            trace!("scancode: {scancode}");
 
             static mut KEYBOARD: pc_keyboard::ScancodeSet1 = pc_keyboard::ScancodeSet1::new();
             match KEYBOARD.advance_state(scancode) {
@@ -213,19 +208,18 @@ extern "C" fn irq_handler(
                                 MODIFIERS.lctrl = key_event.state == pc_keyboard::KeyState::Down;
                             }
                             _ => {
-                                log::debug!("unhandled raw key: {:?}", key);
+                                log::debug!("unhandled raw key: {key:?}");
                             }
                         },
                         pc_keyboard::DecodedKey::Unicode(char) => {
                             if MODIFIERS.lctrl {
-                                if let Some(digit) = char.to_digit(10) {
+                                if let Some(_digit) = char.to_digit(10) {
                                     // switch to tty
                                 }
                             } else if key_event.state == pc_keyboard::KeyState::Down {
                                 if char.is_ascii() {
                                     for process in crate::process::PROCESSES
-                                        .try_write()
-                                        .expect("Failed to lock processes")
+                                        .processes_mut()
                                         .iter_mut()
                                     {
                                         process.stdin.push_back(char as u8);
@@ -242,12 +236,12 @@ extern "C" fn irq_handler(
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    warn!("Failed to advance keyboard state: {:?}", e);
+                    warn!("Failed to advance keyboard state: {e:?}");
                 }
             }
         },
         _ => {
-            debug!("irq: {}", irq);
+            debug!("irq: {irq}");
         }
     }
 
@@ -257,8 +251,8 @@ extern "C" fn irq_handler(
 
     unsafe {
         crate::do_iret(
-            stack_frame.code_segment.0 as u64,
-            stack_frame.stack_segment.0 as u64,
+            u64::from(stack_frame.code_segment.0),
+            u64::from(stack_frame.stack_segment.0),
             stack_frame.cpu_flags.bits(),
             stack_frame.instruction_pointer.as_u64(),
             &GPRegisters {
@@ -343,10 +337,8 @@ extern "x86-interrupt" fn page_fault_handler(
     let address = x86_64::registers::control::Cr2::read().expect("Failed to read CR2 register");
 
     if err.contains(PageFaultErrorCode::USER_MODE) {
-        let mut process_lock =
-            crate::process::current_process_mut().expect("Failed to get current process");
+        let mut process = PROCESSES.current_mut();
 
-        let process = process_lock.get();
         process.state = crate::process::State::Terminated(1);
 
         let mapping = process
@@ -376,11 +368,20 @@ extern "x86-interrupt" fn page_fault_handler(
         }
         log::warn!("{:#x?}", process.registers);
 
-        drop(process_lock);
+        drop(process);
 
-        process::try_schedule().expect("Failed to schedule a process after page fault");
+        process::schedule();
     } else {
-        unsafe { crate::KERNEL_PAGING.get().unwrap().force_unlock() };
+        unsafe {
+            match crate::KERNEL_PAGING.get() {
+                Some(paging) => {
+                    paging.force_unlock();
+                },
+                None => {
+                    panic!("page fault before kernel paging was initialized: {err:?} at {stack_frame:#x?}, caused by address {address:#x}");
+                }
+            }
+        };
         let paging = crate::KERNEL_PAGING.get().unwrap();
 
         match paging

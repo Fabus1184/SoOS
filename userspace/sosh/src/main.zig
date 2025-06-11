@@ -143,6 +143,22 @@ const commands: []const Command = &[_]Command{
             }
         }.test_,
     },
+    .{
+        .name = "exec",
+        .run = struct {
+            fn exec(argc: u32, argv: []const []const u8) void {
+                if (argc < 2) {
+                    soos.print("usage: exec <program> [args...]\n", .{});
+                    return;
+                }
+                const program = argv[1];
+                const args = argv[1..argc];
+                soos.syscalls.execve(program, args) catch |err| {
+                    soos.print("Error: Failed to execute '{s}': {}\n", .{ program, err });
+                };
+            }
+        }.exec,
+    },
 };
 
 fn reset() void {
