@@ -132,11 +132,12 @@ impl Performer {
 
         if self.y >= (self.framebuffer.height * font_scale / u64::from(FONT.tile_size.1)) as usize {
             // If no lines remain, scroll the screen
-            self.scroll();
-            self.y = self.y.saturating_sub(
-                1 + self.y
-                    - (self.framebuffer.height * font_scale / u64::from(FONT.tile_size.1)) as usize,
-            );
+            let diff = 1 + self.y
+                - (self.framebuffer.height * font_scale / u64::from(FONT.tile_size.1)) as usize;
+            for _ in 0..diff {
+                self.scroll();
+            }
+            self.y = self.y.saturating_sub(diff);
         }
 
         if c == '\0' {

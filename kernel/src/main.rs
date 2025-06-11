@@ -209,10 +209,10 @@ unsafe extern "C" fn main() -> ! {
             ))
             .chain(Page::range(
                 Page::containing_address(VirtAddr::new(
-                    kernel::paging::KERNEL_FRAME_MAPPING_ADDRESS, // 0x7776_0000_0000,
+                    kernel::paging::KERNEL_FRAME_MAPPING_ADDRESS,
                 )),
                 Page::containing_address(VirtAddr::new(
-                    kernel::paging::KERNEL_FRAME_MAPPING_ADDRESS + 0x10_0000, //
+                    kernel::paging::KERNEL_FRAME_MAPPING_ADDRESS + 0x10_0000,
                 )),
             )),
         ))

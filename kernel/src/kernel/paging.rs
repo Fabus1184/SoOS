@@ -1,8 +1,8 @@
-use alloc::{borrow::ToOwned as _, string::ParseError};
+use alloc::borrow::ToOwned as _;
 use x86_64::{
     registers::control::{Cr3, Cr3Flags},
     structures::paging::{
-        mapper::{MappedFrame, TranslateResult},
+        mapper::{CleanUp, MappedFrame, TranslateResult},
         FrameAllocator, FrameDeallocator, Mapper as _, OffsetPageTable, Page, PageSize, PageTable,
         PageTableFlags, PhysFrame, Size1GiB, Size2MiB, Size4KiB, Translate,
     },
@@ -21,7 +21,10 @@ pub fn current_page_table() -> *mut PageTable {
 
 /// The address where the kernel frame mapping starts.
 /// This is used to map all frames into virtual memory
-pub const KERNEL_FRAME_MAPPING_ADDRESS: u64 = 0x7776_0000_0000;
+pub const KERNEL_FRAME_MAPPING_ADDRESS: u64 = 0xFFFF_8000_0000_0000;
+
+/// The split between kernel and userspace memory.
+pub const UPPER_HALF_START: u64 = 0xFFFF_7FFF_FFFF_FFFF;
 
 pub struct KernelPaging {
     pub page_table: OffsetPageTable<'static>,
@@ -244,8 +247,8 @@ unsafe impl FrameAllocator<Size4KiB> for KernelFrameAllocator {
         };
 
         self.mark_frame(frame, true);
-        self.skip = skip + 1;
 
+        self.skip = skip + 1;
         self.allocated += 1;
 
         Some(frame)
@@ -518,6 +521,16 @@ impl Drop for UserspacePaging<'_> {
         let mut kernel_paging = crate::kernel_paging();
 
         unsafe {
+            self.page_table.clean_up_addr_range(
+                Page::range_inclusive(
+                    Page::containing_address(VirtAddr::new(0)),
+                    Page::containing_address(VirtAddr::new_truncate(UPPER_HALF_START - 1)),
+                ),
+                &mut kernel_paging.frame_allocator,
+            );
+        }
+
+        unsafe {
             kernel_paging
                 .frame_allocator
                 .deallocate_frame(PhysFrame::containing_address(PhysAddr::new(
@@ -593,7 +606,7 @@ impl UserspacePaging<'_> {
             };
 
             // find free address to map the old and new frames
-            let temp_addr_src = VirtAddr::new_truncate(0x6666_0000_0000);
+            let temp_addr_src = VirtAddr::new_truncate(0xFFFF_9000_0000_0000);
             let temp_addr_dst = temp_addr_src + 0x1000;
 
             let old_frame = self
