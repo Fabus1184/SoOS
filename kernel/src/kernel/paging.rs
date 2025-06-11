@@ -1,8 +1,8 @@
-use alloc::borrow::ToOwned as _;
+use alloc::{borrow::ToOwned as _, string::ParseError};
 use x86_64::{
     registers::control::{Cr3, Cr3Flags},
     structures::paging::{
-        mapper::{MappedFrame, TranslateResult, UnmapError},
+        mapper::{MappedFrame, TranslateResult},
         FrameAllocator, FrameDeallocator, Mapper as _, OffsetPageTable, Page, PageSize, PageTable,
         PageTableFlags, PhysFrame, Size1GiB, Size2MiB, Size4KiB, Translate,
     },
@@ -254,11 +254,9 @@ unsafe impl FrameAllocator<Size4KiB> for KernelFrameAllocator {
 
 impl FrameDeallocator<Size4KiB> for KernelFrameAllocator {
     unsafe fn deallocate_frame(&mut self, frame: PhysFrame<Size4KiB>) {
-        log::debug!("deallocating frame {:#x}", frame.start_address().as_u64());
-
         self.mark_frame(frame, false);
 
-        log::warn!("allocated frames: {}", self.allocated);
+        self.allocated -= 1;
     }
 }
 
@@ -388,10 +386,6 @@ impl KernelPaging {
             );
         }
 
-        let mut kernel_page_table = unsafe {
-            OffsetPageTable::new(&mut PAGE_TABLE, VirtAddr::new(KERNEL_FRAME_MAPPING_ADDRESS))
-        };
-
         for page in keep_pages {
             match old_page_table.translate(page.start_address()) {
                 TranslateResult::Mapped { frame, offset, .. } => {
@@ -453,6 +447,9 @@ impl KernelPaging {
         log::debug!("kernel paging initialized, switching to new page table");
 
         self_.load();
+        self_.page_table = unsafe {
+            OffsetPageTable::new(&mut PAGE_TABLE, VirtAddr::new(KERNEL_FRAME_MAPPING_ADDRESS))
+        };
 
         log::debug!("kernel paging loaded");
 
@@ -582,10 +579,9 @@ impl UserspacePaging<'_> {
                 .allocate_frame()
                 .expect("Failed to allocate frame for cloned page table");
 
-            log::debug!(
-                "cloning page {:#x} with flags {:?} to new frame {:#x}",
+            log::trace!(
+                "cloning page {:#x} to new frame {:#x}",
                 page.start_address().as_u64(),
-                flags,
                 new_frame.start_address().as_u64()
             );
 
@@ -597,7 +593,7 @@ impl UserspacePaging<'_> {
             };
 
             // find free address to map the old and new frames
-            let temp_addr_src = VirtAddr::new_truncate(0x8888_0000_0000);
+            let temp_addr_src = VirtAddr::new_truncate(0x6666_0000_0000);
             let temp_addr_dst = temp_addr_src + 0x1000;
 
             let old_frame = self
@@ -639,20 +635,18 @@ impl UserspacePaging<'_> {
             }
 
             // unmap the temporary pages
-            unsafe {
-                let (frame, flush) = kernel_paging
-                    .page_table
-                    .unmap(Page::<Size4KiB>::containing_address(temp_addr_src))
-                    .expect("Failed to unmap old frame in cloned page table");
-                kernel_paging.frame_allocator.deallocate_frame(frame);
-                flush.flush();
+            // dont deallocate the frames, the old one belongs to the parent process, the new one to the child
+            let (_old_frame, flush) = kernel_paging
+                .page_table
+                .unmap(Page::<Size4KiB>::containing_address(temp_addr_src))
+                .expect("Failed to unmap old frame in cloned page table");
+            flush.flush();
 
-                let (_frame, flush) = kernel_paging
-                    .page_table
-                    .unmap(Page::<Size4KiB>::containing_address(temp_addr_dst))
-                    .expect("Failed to unmap new frame in cloned page table");
-                flush.flush();
-            }
+            let (_frame, flush) = kernel_paging
+                .page_table
+                .unmap(Page::<Size4KiB>::containing_address(temp_addr_dst))
+                .expect("Failed to unmap new frame in cloned page table");
+            flush.flush();
         }
 
         UserspacePaging {

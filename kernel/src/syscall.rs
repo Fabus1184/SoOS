@@ -190,10 +190,11 @@ fn fork(pid: u32) {
 
     // return 0 in the new process
     new_process.registers.rax = 0;
+    let new_pid = new_process.pid();
     PROCESSES.add_process(new_process);
 
     // return the pid of the new process in rax
-    PROCESSES.process_mut(pid).registers.rax = u64::from(pid);
+    PROCESSES.process_mut(pid).registers.rax = u64::from(new_pid);
 }
 
 /// Open a file at the path in rbx, with the length in rcx

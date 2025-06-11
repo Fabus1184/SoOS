@@ -130,8 +130,8 @@ pub unsafe extern "C" fn syscall_handler(
     registers: GPRegisters,
     stack_frame: InterruptStackFrame,
 ) {
-    trace!(
-        "syscall_handler: stack_frame {stack_frame:0x?}, registers {registers:0x?}"
+    log::trace!(
+        "syscall_handler: stack_frame {stack_frame:x?}, registers {registers:x?}"
     );
 
     let mut process = PROCESSES.current_mut();
@@ -301,10 +301,32 @@ extern "x86-interrupt" fn general_protection_fault_handler(
     stack_frame: InterruptStackFrame,
     err: u64,
 ) {
-    panic!(
-        "EXCEPTION: GENERAL PROTECTION FAULT {:#x?}\n Error code: {}",
-        stack_frame, err
-    );
+    if (stack_frame.code_segment.rpl() == x86_64::PrivilegeLevel::Ring3)
+        && (err & 0x1 == 0)
+    {
+        // User mode general protection fault
+        let mut process = PROCESSES.current_mut();
+
+        process.state = crate::process::State::Terminated(1);
+
+        log::warn!(
+            "User mode general protection fault in process {}: {:#x?}, error code: {}",
+            process.pid(),
+            stack_frame,
+            err
+        );
+
+        drop(process);
+
+        process::schedule();
+    } else {
+        panic!(
+            "EXCEPTION: GENERAL PROTECTION FAULT {:#x?}\n Error code: {}",
+            stack_frame, err
+        );
+
+    }
+
 }
 
 extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
@@ -366,7 +388,7 @@ extern "x86-interrupt" fn page_fault_handler(
                 log::warn!("Page fault in process {} ({err:?}): {stack_frame:#x?}, caused by invalid mapping address {address:#x} with physical address {phys_addr:x}", process.pid());
             }
         }
-        log::warn!("{:#x?}", process.registers);
+        log::warn!("{:x?}", process.registers);
 
         drop(process);
 

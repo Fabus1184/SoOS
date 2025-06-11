@@ -381,7 +381,7 @@ pub fn schedule() -> ! {
 
                 unsafe {
                     crate::do_iret(cs, ds, flags, rip, &raw const registers);
-                };
+                }
             } else {
                 processes.rotate_left(1);
             }
