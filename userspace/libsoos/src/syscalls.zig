@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub const types = @cImport({
-    @cInclude("typedefs/types.h");
+    @cInclude("typedefs/syscalls.h");
 });
 
 const Syscall = struct {
@@ -23,6 +23,7 @@ const SYSCALLS: []const Syscall = &[_]Syscall{
     Syscall{ .name = "mmap", .number = types.SYSCALL_MMAP, .arg_type = types.syscall_mmap_t, .return_type = types.syscall_mmap_return_t },
     Syscall{ .name = "munmap", .number = types.SYSCALL_MUNMAP, .arg_type = types.syscall_munmap_t, .return_type = types.syscall_munmap_return_t },
     Syscall{ .name = "execve", .number = types.SYSCALL_EXECVE, .arg_type = types.syscall_execve_t, .return_type = types.syscall_execve_return_t },
+    Syscall{ .name = "map_framebuffer", .number = types.SYSCALL_MAP_FRAMEBUFFER, .arg_type = types.syscall_map_framebuffer_t, .return_type = types.syscall_map_framebuffer_return_t },
 };
 
 fn call(comptime syscall: Syscall, arg: *syscall.arg_type) syscall.return_type {
@@ -73,4 +74,7 @@ pub fn munmap(arg: *types.syscall_munmap_t) types.syscall_munmap_return_t {
 }
 pub fn execve(arg: *types.syscall_execve_t) types.syscall_execve_return_t {
     return call(SYSCALLS[10], arg);
+}
+pub fn mapFramebuffer(arg: *types.syscall_map_framebuffer_t) types.syscall_map_framebuffer_return_t {
+    return call(SYSCALLS[11], arg);
 }

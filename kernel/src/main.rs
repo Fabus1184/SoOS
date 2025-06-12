@@ -15,6 +15,7 @@ extern crate alloc;
 
 mod driver;
 mod elf;
+mod events;
 mod font;
 mod idt;
 mod io;
@@ -186,6 +187,30 @@ unsafe extern "C" fn main() -> ! {
 
     idt::load_idt();
     pic::init();
+    let mut data_port = x86_64::instructions::port::Port::<u8>::new(0x60);
+    let mut command_port = x86_64::instructions::port::Port::<u8>::new(0x64);
+    loop {
+        if data_port.read() & 0b1 == 0 {
+            break;
+        }
+    }
+
+    command_port.write(0x20); // read command byte
+    let command_byte = data_port.read();
+
+    let command_byte = (command_byte | 0b11) & !(1 << 4) & !(1 << 5);
+    command_port.write(0x60); // write command byte
+    data_port.write(command_byte);
+
+    command_port.write(0xA8); // enable second port (PS/2 mouse)
+
+    command_port.write(0xD4); // write to mouse
+    data_port.write(0xF4); // enable mouse
+    let ack = data_port.read();
+    assert!(
+        ack == 0xFA,
+        "mouse did not acknowledge command, got {ack:#x}",
+    );
 
     let offset = hhdm.offset();
 
@@ -253,7 +278,7 @@ unsafe extern "C" fn main() -> ! {
         ucs,
         uds,
         0x202,
-        include_bytes_aligned::include_bytes_aligned!(32, "../../build/userspace/bin/sosh"),
+        include_bytes_aligned::include_bytes_aligned!(32, "../../build/userspace/bin/sogui"),
     ));
 
     log::info!("kernel initialization complete, starting scheduler");

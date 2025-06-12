@@ -39,7 +39,7 @@ pub fn init_fs(fs: &mut Directory) {
                 .entry(alloc::format!("{pid}"))
                 .or_insert(File::special(move |_self, offset, writer| {
                     if offset != 0 {
-                        return Err(crate::io::WriteError::InvalidOffset);
+                        return Err(crate::io::WriterError::InvalidOffset);
                     }
 
                     let mut written = 0;
@@ -175,5 +175,10 @@ pub fn init_fs(fs: &mut Directory) {
 
             Ok(written)
         }),
+    );
+
+    fs.create_file(
+        "/dev/mouse",
+        File::stream(crate::process::StreamType::Mouse),
     );
 }

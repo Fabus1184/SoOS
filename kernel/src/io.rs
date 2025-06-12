@@ -1,5 +1,5 @@
 pub trait Write {
-    fn write(&mut self, bytes: &[u8]) -> Result<usize, WriteError>;
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, WriterError>;
 }
 
 /// Ignorer is a writer that ignores the first `count` bytes written to it,
@@ -16,7 +16,7 @@ impl<T: Write> Ignorer<T> {
 }
 
 impl<T: Write> Write for Ignorer<T> {
-    fn write(&mut self, bytes: &[u8]) -> Result<usize, WriteError> {
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, WriterError> {
         if self.count > 0 {
             let to_ignore = bytes.len().min(self.count);
             self.count -= to_ignore;
@@ -33,7 +33,7 @@ impl<T: Write> Write for Ignorer<T> {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum WriteError {
+pub enum WriterError {
     #[error("Write operation failed due to an invalid offset")]
     InvalidOffset,
 }
@@ -53,7 +53,7 @@ impl<'a> Cursor<'a> {
 }
 
 impl Write for Cursor<'_> {
-    fn write(&mut self, bytes: &[u8]) -> Result<usize, WriteError> {
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, WriterError> {
         if bytes.is_empty() {
             return Ok(0);
         }
@@ -61,7 +61,7 @@ impl Write for Cursor<'_> {
         let len = bytes.len().min(self.buffer.len() - self.position);
 
         if self.position + len > self.buffer.len() {
-            return Err(WriteError::InvalidOffset);
+            return Err(WriterError::InvalidOffset);
         }
 
         self.buffer[self.position..self.position + len].copy_from_slice(&bytes[..len]);

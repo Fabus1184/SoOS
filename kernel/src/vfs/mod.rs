@@ -1,5 +1,7 @@
 use alloc::string::{String, ToString as _};
 
+use crate::process::StreamType;
+
 pub mod root;
 
 pub enum Directory {
@@ -25,9 +27,16 @@ pub enum File {
     },
     Special {
         read: alloc::boxed::Box<
-            dyn Fn(&File, usize, &mut dyn crate::io::Write) -> Result<usize, crate::io::WriteError>,
+            dyn Fn(
+                &File,
+                usize,
+                &mut dyn crate::io::Write,
+            ) -> Result<usize, crate::io::WriterError>,
         >,
         write: (),
+    },
+    Stream {
+        stream_type: StreamType,
     },
 }
 
@@ -39,7 +48,7 @@ impl File {
     }
 
     pub fn special(
-        read: impl Fn(&File, usize, &mut dyn crate::io::Write) -> Result<usize, crate::io::WriteError>
+        read: impl Fn(&File, usize, &mut dyn crate::io::Write) -> Result<usize, crate::io::WriterError>
             + 'static,
     ) -> Self {
         File::Special {
@@ -48,16 +57,21 @@ impl File {
         }
     }
 
+    pub fn stream(stream_type: StreamType) -> Self {
+        File::Stream { stream_type }
+    }
+
     pub fn read(
         &self,
         offset: usize,
         mut writer: impl crate::io::Write,
-    ) -> Result<usize, crate::io::WriteError> {
+    ) -> Result<usize, crate::io::WriterError> {
         match self {
             File::Regular { contents } => writer.write(&contents[offset..]),
             File::Special { read, .. } => {
                 read(self, 0, &mut crate::io::Ignorer::ignoring(offset, writer))
             }
+            File::Stream { .. } => panic!("cannot read from a stream file"),
         }
     }
 }
@@ -242,6 +256,9 @@ impl Directory {
                 }
                 File::Special { .. } => {
                     log::debug!("{:indent$}+ '{name}' (special)", "");
+                }
+                File::Stream { stream_type } => {
+                    log::debug!("{:indent$}+ '{name}' (stream {:?})", "", stream_type);
                 }
             }
         }

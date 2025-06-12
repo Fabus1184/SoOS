@@ -1,6 +1,7 @@
 use core::{cell::RefCell, sync::atomic::AtomicU32};
 
 use alloc::{collections::vec_deque::VecDeque, vec::Vec};
+use anyhow::Context;
 use x86_64::structures::paging::{FrameDeallocator, Mapper};
 
 use crate::kernel::paging::UserspacePaging;
@@ -27,7 +28,7 @@ static PID_FACTORY: PidFactory = PidFactory::new();
 pub enum State {
     Ready,
     Sleeping(u64),
-    WaitingForStdin,
+    WaitingForStream(i32),
     Terminated(u64),
 }
 
@@ -47,32 +48,28 @@ pub struct Process {
     pub flags: u64,
     pub rip: u64,
     pub registers: crate::idt::GPRegisters,
-    pub stdin: alloc::collections::VecDeque<u8>,
     pub mapped_pages: Vec<MappedPage>,
-    file_descriptors: alloc::collections::BTreeMap<FileDescriptor, ProcessFileDescriptor>,
+    file_descriptors: alloc::collections::BTreeMap<i32, Processi32>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ProcessFileDescriptor {
-    pub path: alloc::string::String,
-    pub offset: usize,
+pub enum Processi32 {
+    Regular {
+        path: alloc::string::String,
+        offset: usize,
+    },
+    Stream {
+        buffer: VecDeque<u8>,
+        max_size: usize,
+        stream_type: StreamType,
+    },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd)]
-pub struct FileDescriptor(u64);
-
-impl FileDescriptor {
-    const fn from_index(fd: usize) -> Self {
-        FileDescriptor(fd as u64 + 3) // 0, 1, 2 are reserved for stdin, stdout, stderr
-    }
-
-    pub const fn from_u64(fd: u64) -> Self {
-        FileDescriptor(fd)
-    }
-
-    pub const fn as_u64(self) -> u64 {
-        self.0
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamType {
+    Stdin,
+    Keyboard,
+    Mouse,
 }
 
 pub struct Processes {
@@ -81,29 +78,48 @@ pub struct Processes {
 }
 
 impl Processes {
+    #[track_caller]
     pub fn process(&self, pid: u32) -> impl core::ops::Deref<Target = Process> + '_ {
-        core::cell::Ref::map(self.processes.borrow(), |processes| {
-            processes
-                .iter()
-                .find(|p| p.pid == pid)
-                .expect("Process not found")
-        })
+        core::cell::Ref::map(
+            self.processes
+                .try_borrow()
+                .with_context(|| core::panic::Location::caller())
+                .expect("Failed to borrow processes"),
+            |processes| {
+                processes
+                    .iter()
+                    .find(|p| p.pid == pid)
+                    .expect("Process not found")
+            },
+        )
     }
 
+    #[track_caller]
     pub fn process_mut(&self, pid: u32) -> impl core::ops::DerefMut<Target = Process> + '_ {
-        core::cell::RefMut::map(self.processes.borrow_mut(), |processes| {
-            processes
-                .iter_mut()
-                .find(|p| p.pid == pid)
-                .expect("Process not found")
-        })
+        core::cell::RefMut::map(
+            self.processes
+                .try_borrow_mut()
+                .with_context(|| core::panic::Location::caller())
+                .expect("Failed to borrow processes"),
+            |processes| {
+                processes
+                    .iter_mut()
+                    .find(|p| p.pid == pid)
+                    .expect("Process not found")
+            },
+        )
     }
 
+    #[track_caller]
     pub fn with_process<F, R>(&self, pid: u32, f: F) -> R
     where
         F: FnOnce(&Process) -> R,
     {
-        let processes = self.processes.borrow();
+        let processes = self
+            .processes
+            .try_borrow()
+            .with_context(|| core::panic::Location::caller())
+            .expect("Failed to borrow processes");
         processes
             .iter()
             .find(|p| p.pid == pid)
@@ -111,11 +127,16 @@ impl Processes {
             .expect("Process not found")
     }
 
+    #[track_caller]
     pub fn with_process_mut<F, R>(&self, pid: u32, f: F) -> R
     where
         F: FnOnce(&mut Process) -> R,
     {
-        let mut processes = self.processes.borrow_mut();
+        let mut processes = self
+            .processes
+            .try_borrow_mut()
+            .with_context(|| core::panic::Location::caller())
+            .expect("Failed to borrow processes");
         processes
             .iter_mut()
             .find(|p| p.pid == pid)
@@ -123,12 +144,20 @@ impl Processes {
             .expect("Process not found")
     }
 
+    #[track_caller]
     pub fn processes(&self) -> core::cell::Ref<'_, VecDeque<Process>> {
-        self.processes.borrow()
+        self.processes
+            .try_borrow()
+            .with_context(|| core::panic::Location::caller())
+            .expect("Failed to borrow processes")
     }
 
+    #[track_caller]
     pub fn processes_mut(&self) -> core::cell::RefMut<'_, VecDeque<Process>> {
-        self.processes.borrow_mut()
+        self.processes
+            .try_borrow_mut()
+            .with_context(|| core::panic::Location::caller())
+            .expect("Failed to borrow processes")
     }
 
     pub fn current(&self) -> core::cell::Ref<'_, Process> {
@@ -184,6 +213,16 @@ impl Process {
 
         log::debug!("elf for pid {pid} loaded at address {userspace_address:#x}, stack at {userspace_stack:#x}");
 
+        let mut file_descriptors = alloc::collections::BTreeMap::new();
+        file_descriptors.insert(
+            0,
+            Processi32::Stream {
+                buffer: alloc::collections::vec_deque::VecDeque::new(),
+                max_size: 1024,
+                stream_type: StreamType::Keyboard,
+            },
+        );
+
         Process {
             pid: PID_FACTORY.next_pid(),
             state: State::Ready,
@@ -196,9 +235,8 @@ impl Process {
                 rsp: userspace_stack.as_u64(),
                 ..Default::default()
             },
-            stdin: alloc::collections::VecDeque::new(),
             mapped_pages,
-            file_descriptors: alloc::collections::BTreeMap::new(),
+            file_descriptors,
         }
     }
 
@@ -251,13 +289,23 @@ impl Process {
                     process.state = State::Ready;
                 }
             }
-            State::WaitingForStdin => {
-                if !process.stdin.is_empty() {
-                    drop(process);
+            State::WaitingForStream(fd) => {
+                let fd = process
+                    .file_descriptors
+                    .get(&fd)
+                    .expect("File descriptor not found");
 
-                    crate::syscall::handle_syscall(pid);
-
-                    PROCESSES.process_mut(pid).state = State::Ready;
+                match fd {
+                    Processi32::Stream { buffer, .. } => {
+                        if !buffer.is_empty() {
+                            drop(process);
+                            crate::syscall::handle_syscall(pid);
+                            PROCESSES.process_mut(pid).state = State::Ready;
+                        }
+                    }
+                    Processi32::Regular { .. } => {
+                        panic!("cannot wait for regular file descriptor")
+                    }
                 }
             }
             _ => {}
@@ -282,32 +330,35 @@ impl Process {
             flags: self.flags,
             rip: self.rip,
             registers: self.registers,
-            stdin: self.stdin.clone(),
             mapped_pages: self.mapped_pages.clone(),
             file_descriptors: self.file_descriptors.clone(),
         }
     }
 
-    pub fn new_file_descriptor(&mut self, fd: ProcessFileDescriptor) -> FileDescriptor {
-        let index = self.file_descriptors.len();
-        let file_descriptor = FileDescriptor::from_index(index);
+    pub fn new_file_descriptor(&mut self, fd: Processi32) -> i32 {
+        let file_descriptor = self.file_descriptors.keys().max().map_or(0, |max| max + 1);
         self.file_descriptors.insert(file_descriptor, fd);
         file_descriptor
     }
 
-    pub fn close_file_descriptor(&mut self, fd: FileDescriptor) -> Option<ProcessFileDescriptor> {
+    pub fn close_file_descriptor(&mut self, fd: i32) -> Option<Processi32> {
         self.file_descriptors.remove(&fd)
     }
 
-    pub fn file_descriptor(&self, fd: FileDescriptor) -> Option<&ProcessFileDescriptor> {
+    pub fn file_descriptor(&self, fd: i32) -> Option<&Processi32> {
         self.file_descriptors.get(&fd)
     }
 
-    pub fn file_descriptor_mut(
-        &mut self,
-        fd: FileDescriptor,
-    ) -> Option<&mut ProcessFileDescriptor> {
+    pub fn file_descriptor_mut(&mut self, fd: i32) -> Option<&mut Processi32> {
         self.file_descriptors.get_mut(&fd)
+    }
+
+    pub fn file_descriptors(&self) -> impl Iterator<Item = (&i32, &Processi32)> {
+        self.file_descriptors.iter()
+    }
+
+    pub fn file_descriptors_mut(&mut self) -> impl Iterator<Item = (&i32, &mut Processi32)> {
+        self.file_descriptors.iter_mut()
     }
 }
 
@@ -340,11 +391,7 @@ pub fn schedule() -> ! {
 
         processes.retain(|p| !matches!(p.state, State::Terminated(_)));
 
-        if processes.is_empty() {
-            log::error!("No user processes left, halting forever!. Goodbye!");
-            x86_64::instructions::interrupts::disable();
-            x86_64::instructions::hlt();
-        }
+        assert!(!processes.is_empty(), "No processes left to schedule!");
 
         let len = processes.len();
         drop(processes);

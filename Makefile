@@ -7,6 +7,8 @@ RELEASE=1
 KERNEL=build/kernel/x86_64-unknown-none/$(if $(RELEASE),release,debug)/soos
 KERNEL_SOURCES := $(shell find kernel -type f)
 
+USERSPACE_APPLICATIONS=$(patsubst %, build/userspace/bin/%, sosh sogui)
+
 clean:
 	rm SoOS.iso || true
 	rm -rf build/* || true
@@ -21,10 +23,10 @@ $(LIMINE_FILES) $(LIMINE_BIN): $(LIMINE)
 build/userspace/bin:
 	mkdir -p build/userspace/bin
 
-build/userspace/bin/sosh: userspace/sosh build/userspace/bin
+build/userspace/bin/%: userspace/% build/userspace/bin
 	cd $< && zig build -p ../../build/userspace
 
-$(KERNEL): build/userspace/bin/sosh $(KERNEL_SOURCES)
+$(KERNEL): $(USERSPACE_APPLICATIONS) $(KERNEL_SOURCES)
 	cd kernel && cargo build $(if $(RELEASE),--release)
 
 build/iso-root: $(KERNEL) $(LIMINE_FILES)

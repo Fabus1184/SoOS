@@ -1,14 +1,12 @@
-use alloc::{
-    string::{String, ToString},
-    vec,
-};
+use alloc::{string::String, vec};
 use core::fmt::Write as _;
 use log::trace;
 use x86_64::structures::paging::{
-    FrameAllocator, FrameDeallocator as _, Mapper, Page, PageTableFlags, Size4KiB,
+    FrameAllocator, FrameDeallocator as _, Mapper, Page, PageSize, PageTableFlags, Size4KiB,
+    Translate,
 };
 
-use crate::process::{FileDescriptor, MappedPage, PROCESSES};
+use crate::process::{MappedPage, PROCESSES};
 
 mod generated;
 
@@ -139,43 +137,18 @@ fn read(pid: u32, arg: &mut generated::syscall_read_t) {
         arg.len
     );
 
-    match arg.fd {
-        // 0 is stdin
-        0 => {
-            PROCESSES.with_process_mut(pid, |p| {
-                if p.stdin.is_empty() {
-                    p.state = crate::process::State::WaitingForStdin;
-                    log::trace!("Process {} is waiting for stdin", p.pid());
-                } else {
-                    for i in 0..arg.len {
-                        if let Some(byte) = p.stdin.pop_front() {
-                            unsafe { arg.buf.cast::<u8>().add(i as usize).write_volatile(byte) };
-                        } else {
-                            arg.return_value.bytes_read = i;
-                            arg.return_value.error = generated::SYSCALL_READ_ERROR_NONE;
+    let mut process = crate::process::PROCESSES.process_mut(pid);
+    let Some(fd) = process.file_descriptor_mut(arg.fd) else {
+        log::debug!("Invalid file descriptor: {}", arg.fd);
+        arg.return_value.bytes_read = 0;
+        arg.return_value.error = generated::SYSCALL_READ_ERROR_INVALID_FD;
+        return;
+    };
 
-                            log::trace!("Read {i} bytes from stdin");
-                            break;
-                        }
-                    }
-                }
-            });
-        }
-        fd => {
-            log::trace!("syscall_handler: read from file descriptor {fd}");
-
-            let process = PROCESSES.process(pid);
-            let descriptor = process.file_descriptor(FileDescriptor::from_u64(arg.fd as u64));
-
-            let Some(file_descriptor) = descriptor else {
-                log::debug!("Invalid file descriptor: {fd}");
-                arg.return_value.bytes_read = 0;
-                arg.return_value.error = generated::SYSCALL_READ_ERROR_INVALID_FD;
-                return;
-            };
-
-            let offset = file_descriptor.offset;
-            let path = file_descriptor.path.clone();
+    match fd {
+        crate::process::Processi32::Regular { path, offset } => {
+            let offset = *offset;
+            let path = path.clone();
             drop(process);
 
             let mut fs = crate::FILE_SYSTEM
@@ -187,12 +160,18 @@ fn read(pid: u32, arg: &mut generated::syscall_read_t) {
 
             let read_result = file.read(offset, crate::io::Cursor::new(&mut buffer));
 
-            log::trace!("read_result for file descriptor {fd:?}: {read_result:?}");
+            log::trace!(
+                "read_result for file descriptor {:?}: {read_result:?}",
+                arg.fd
+            );
 
             PROCESSES.with_process_mut(pid, |p| {
-                let fd = p
-                    .file_descriptor_mut(FileDescriptor::from_u64(fd as u64))
-                    .expect("File descriptor not found");
+                let crate::process::Processi32::Regular { offset, .. } = p
+                    .file_descriptor_mut(arg.fd)
+                    .expect("File descriptor not found")
+                else {
+                    panic!("Expected a regular file descriptor")
+                };
 
                 match read_result {
                     Ok(n) => {
@@ -203,18 +182,37 @@ fn read(pid: u32, arg: &mut generated::syscall_read_t) {
                                 n,
                             );
                         }
-                        fd.offset += n;
+                        *offset += n;
 
                         arg.return_value.bytes_read = n as u32;
                         arg.return_value.error = generated::SYSCALL_READ_ERROR_NONE;
                     }
                     Err(e) => {
-                        log::debug!("Failed to read from file descriptor {fd:?}: {e}");
+                        log::debug!("Failed to read from file descriptor {:?}: {e}", arg.fd);
                         arg.return_value.bytes_read = 0;
                         arg.return_value.error = generated::SYSCALL_READ_ERROR_INVALID_FD;
                     }
                 }
             });
+        }
+        crate::process::Processi32::Stream { buffer, .. } => {
+            if buffer.is_empty() {
+                process.state = crate::process::State::WaitingForStream(arg.fd);
+            } else {
+                let bytes = buffer.drain(0..(arg.len as usize).min(buffer.len()));
+                let len = bytes.len();
+
+                for (i, byte) in bytes.enumerate() {
+                    unsafe { arg.buf.cast::<u8>().add(i as usize).write_volatile(byte) };
+
+                    log::trace!("Read {i} bytes from stdin");
+                }
+
+                arg.return_value.bytes_read = len as u32;
+                arg.return_value.error = generated::SYSCALL_READ_ERROR_NONE;
+
+                process.state = crate::process::State::Ready;
+            }
         }
     }
 }
@@ -243,17 +241,25 @@ fn open(pid: u32, arg: &mut generated::syscall_open_t) {
 
     log::trace!("syscall_handler: open '{path}'");
 
-    if let Some(_file) = crate::FILE_SYSTEM
+    if let Some(file) = crate::FILE_SYSTEM
         .try_lock()
         .expect("Failed to lock file system")
         .file_mut(&path)
     {
         let mut process = PROCESSES.process_mut(pid);
 
-        let fd =
-            process.new_file_descriptor(crate::process::ProcessFileDescriptor { path, offset: 0 });
+        let fd = match file {
+            &mut crate::vfs::File::Stream { stream_type } => crate::process::Processi32::Stream {
+                buffer: alloc::collections::VecDeque::with_capacity(1024),
+                max_size: 1024,
+                stream_type,
+            },
+            _ => crate::process::Processi32::Regular { path, offset: 0 },
+        };
 
-        arg.return_value.fd = fd.as_u64() as i32;
+        let fd = process.new_file_descriptor(fd);
+
+        arg.return_value.fd = fd;
         arg.return_value.error = generated::SYSCALL_OPEN_ERROR_NONE;
     } else {
         log::debug!("File not found: {path}");
@@ -268,10 +274,7 @@ fn open(pid: u32, arg: &mut generated::syscall_open_t) {
 fn close(pid: u32, arg: &mut generated::syscall_close_t) {
     let mut process = PROCESSES.process_mut(pid);
 
-    if process
-        .close_file_descriptor(FileDescriptor::from_u64(arg.fd as u64))
-        .is_some()
-    {
+    if process.close_file_descriptor(arg.fd).is_some() {
         log::trace!("syscall_handler: closed file descriptor {}", arg.fd);
 
         arg.return_value.error = generated::SYSCALL_CLOSE_ERROR_NONE;
@@ -406,6 +409,70 @@ fn execve(pid: u32, arg: &mut generated::syscall_execve_t) {
     }
 }
 
+fn map_framebuffer(pid: u32, arg: &mut generated::syscall_map_framebuffer_t) {
+    log::debug!("syscall_handler: map framebuffer");
+
+    let mut kernel_paging = crate::kernel_paging();
+    let mut process = PROCESSES.process_mut(pid);
+
+    let size = crate::term::TERM.framebuffer.height * crate::term::TERM.framebuffer.width * 4;
+
+    let start_phys_address = kernel_paging
+        .page_table
+        .translate_addr(x86_64::VirtAddr::new(
+            crate::term::TERM.framebuffer.ptr as u64,
+        ))
+        .expect("Failed to translate framebuffer address");
+    let start_phys_frame = start_phys_address.align_down(Size4KiB::SIZE);
+
+    let start_address = process
+        .mapped_pages
+        .iter()
+        .map(|&m| m.page.start_address().align_up(Size4KiB::SIZE).as_u64() + 0x1000)
+        .max()
+        .unwrap_or(0x6942_0000_0000);
+
+    log::debug!(
+        "mapping framebuffer at {start_address:#x} to {start_phys_frame:#x} ({start_phys_address:#x}) with size {size} bytes",
+    );
+
+    let flags = PageTableFlags::PRESENT
+        | PageTableFlags::WRITABLE
+        | PageTableFlags::USER_ACCESSIBLE
+        | PageTableFlags::NO_EXECUTE;
+
+    let mut mapped = 0;
+    while mapped < size {
+        let frame = x86_64::structures::paging::PhysFrame::<Size4KiB>::containing_address(
+            start_phys_frame + mapped,
+        );
+
+        unsafe {
+            process
+                .paging
+                .page_table
+                .map_to(
+                    Page::<Size4KiB>::containing_address(x86_64::VirtAddr::new(
+                        start_address + mapped,
+                    )),
+                    frame,
+                    flags,
+                    &mut kernel_paging.frame_allocator,
+                )
+                .expect("Failed to map framebuffer page")
+                .flush();
+        }
+
+        mapped += Size4KiB::SIZE; // 4KiB
+    }
+
+    arg.return_value = generated::syscall_map_framebuffer_return_t {
+        addr: (start_address + start_phys_address.as_u64() % 0x1000) as *mut _,
+        width: crate::term::TERM.framebuffer.width as u32,
+        height: crate::term::TERM.framebuffer.height as u32,
+    };
+}
+
 /// Handle system calls
 /// return true if the process still exists, false if it was terminated
 pub fn handle_syscall(pid: u32) {
@@ -430,6 +497,7 @@ pub fn handle_syscall(pid: u32) {
         8 => mmap(pid, unsafe { &mut *(rbx as *mut _) }),
         9 => munmap(pid, unsafe { &mut *(rbx as *mut _) }),
         10 => execve(pid, unsafe { &mut *(rbx as *mut _) }),
+        11 => map_framebuffer(pid, unsafe { &mut *(rbx as *mut _) }),
         n => panic!("unknown syscall: {n:#x}"),
     }
 }

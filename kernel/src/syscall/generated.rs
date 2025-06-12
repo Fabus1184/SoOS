@@ -201,6 +201,7 @@ pub const syscall_id_t_SYSCALL_CLOSE: syscall_id_t = 7;
 pub const syscall_id_t_SYSCALL_MMAP: syscall_id_t = 8;
 pub const syscall_id_t_SYSCALL_MUNMAP: syscall_id_t = 9;
 pub const syscall_id_t_SYSCALL_EXECVE: syscall_id_t = 10;
+pub const syscall_id_t_SYSCALL_MAP_FRAMEBUFFER: syscall_id_t = 11;
 pub type syscall_id_t = ::core::ffi::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -564,4 +565,38 @@ const _: () = {
         [::core::mem::offset_of!(syscall_execve_t, envp_len) - 40usize];
     ["Offset of field: syscall_execve_t::return_value"]
         [::core::mem::offset_of!(syscall_execve_t, return_value) - 44usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct syscall_map_framebuffer_return_t {
+    pub addr: *mut ::core::ffi::c_void,
+    pub width: u32,
+    pub height: u32,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of syscall_map_framebuffer_return_t"]
+        [::core::mem::size_of::<syscall_map_framebuffer_return_t>() - 16usize];
+    ["Alignment of syscall_map_framebuffer_return_t"]
+        [::core::mem::align_of::<syscall_map_framebuffer_return_t>() - 8usize];
+    ["Offset of field: syscall_map_framebuffer_return_t::addr"]
+        [::core::mem::offset_of!(syscall_map_framebuffer_return_t, addr) - 0usize];
+    ["Offset of field: syscall_map_framebuffer_return_t::width"]
+        [::core::mem::offset_of!(syscall_map_framebuffer_return_t, width) - 8usize];
+    ["Offset of field: syscall_map_framebuffer_return_t::height"]
+        [::core::mem::offset_of!(syscall_map_framebuffer_return_t, height) - 12usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct syscall_map_framebuffer_t {
+    pub return_value: syscall_map_framebuffer_return_t,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of syscall_map_framebuffer_t"]
+        [::core::mem::size_of::<syscall_map_framebuffer_t>() - 16usize];
+    ["Alignment of syscall_map_framebuffer_t"]
+        [::core::mem::align_of::<syscall_map_framebuffer_t>() - 8usize];
+    ["Offset of field: syscall_map_framebuffer_t::return_value"]
+        [::core::mem::offset_of!(syscall_map_framebuffer_t, return_value) - 0usize];
 };

@@ -12,6 +12,7 @@ enum syscall_id_t {
     SYSCALL_MMAP = 8,
     SYSCALL_MUNMAP = 9,
     SYSCALL_EXECVE = 10,
+    SYSCALL_MAP_FRAMEBUFFER = 11,
 };
 
 struct string_t {
@@ -145,4 +146,13 @@ struct syscall_execve_t {
     struct string_const_t *envp;
     uint32_t envp_len;
     struct syscall_execve_return_t return_value;
+};
+
+struct syscall_map_framebuffer_return_t {
+    void *addr;
+    uint32_t width;
+    uint32_t height;
+};
+struct syscall_map_framebuffer_t {
+    struct syscall_map_framebuffer_return_t return_value;
 };

@@ -130,9 +130,7 @@ pub unsafe extern "C" fn syscall_handler(
     registers: GPRegisters,
     stack_frame: InterruptStackFrame,
 ) {
-    log::trace!(
-        "syscall_handler: stack_frame {stack_frame:x?}, registers {registers:x?}"
-    );
+    log::trace!("syscall_handler: stack_frame {stack_frame:x?}, registers {registers:x?}");
 
     let mut process = PROCESSES.current_mut();
 
@@ -142,7 +140,7 @@ pub unsafe extern "C" fn syscall_handler(
         rsp: stack_frame.stack_pointer.as_u64(),
         ..registers
     };
-    
+
     let pid = process.pid();
 
     drop(process);
@@ -218,11 +216,32 @@ extern "C" fn irq_handler(
                                 }
                             } else if key_event.state == pc_keyboard::KeyState::Down {
                                 if char.is_ascii() {
-                                    for process in crate::process::PROCESSES
-                                        .processes_mut()
-                                        .iter_mut()
+                                    for process in
+                                        crate::process::PROCESSES.processes_mut().iter_mut()
                                     {
-                                        process.stdin.push_back(char as u8);
+                                        let pid = process.pid();
+                                        for (_, fd) in process.file_descriptors_mut() {
+                                            if let process::Processi32::Stream {
+                                                buffer,
+                                                max_size,
+                                                stream_type,
+                                            } = fd
+                                            {
+                                                if *stream_type
+                                                    == crate::process::StreamType::Keyboard
+                                                {
+                                                    if buffer.len() < *max_size {
+                                                        buffer.push_back(char as u8);
+                                                    } else {
+                                                        warn!(
+                                                            "keyboard buffer overflow in process {pid}: buffer size {} exceeds max size {}",
+                                                            buffer.len(),
+                                                            max_size
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 } else {
                                     warn!(
@@ -240,6 +259,65 @@ extern "C" fn irq_handler(
                 }
             }
         },
+        12 => {
+            let status = unsafe { <u8 as PortRead>::read_from_port(0x64) };
+            if status & 0x20 != 0 {
+                let byte1 = unsafe { <u8 as PortRead>::read_from_port(0x60) };
+                let byte2 = unsafe { <u8 as PortRead>::read_from_port(0x60) };
+                let byte3 = unsafe { <u8 as PortRead>::read_from_port(0x60) };
+
+                let right_button = byte1 & 0b0000_0001 != 0;
+                let left_button = byte1 & 0b0000_0010 != 0;
+                let x_movement = if byte1 & 0b0000_0100 == 0 {
+                    byte2 as i8
+                } else {
+                    -(byte2 as i8)
+                };
+                let y_movement = if byte1 & 0b0000_1000 == 0 {
+                    byte3 as i8
+                } else {
+                    -(byte3 as i8)
+                };
+
+                let event = crate::events::mouse_event_t {
+                    x_movement,
+                    y_movement,
+                    left_button_pressed: u8::from(left_button),
+                    right_button_pressed: u8::from(right_button),
+                };
+
+                for process in crate::process::PROCESSES.processes_mut().iter_mut() {
+                    let pid = process.pid();
+
+                    for (_, fd) in process.file_descriptors_mut() {
+                        if let process::Processi32::Stream {
+                            buffer,
+                            max_size,
+                            stream_type,
+                        } = fd
+                        {
+                            if *stream_type == crate::process::StreamType::Mouse {
+                                if buffer.len() < *max_size {
+                                    let bytes = unsafe {
+                                        core::mem::transmute::<
+                                            crate::events::mouse_event_t,
+                                            [u8; size_of::<crate::events::mouse_event_t>()],
+                                        >(event)
+                                    };
+                                    buffer.extend(bytes);
+                                } else {
+                                    warn!(
+                                        "mouse buffer overflow in process {pid}: buffer size {} exceeds max size {}",
+                                        buffer.len(),
+                                        max_size
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         _ => {
             debug!("irq: {irq}");
         }
@@ -301,9 +379,7 @@ extern "x86-interrupt" fn general_protection_fault_handler(
     stack_frame: InterruptStackFrame,
     err: u64,
 ) {
-    if (stack_frame.code_segment.rpl() == x86_64::PrivilegeLevel::Ring3)
-        && (err & 0x1 == 0)
-    {
+    if (stack_frame.code_segment.rpl() == x86_64::PrivilegeLevel::Ring3) && (err & 0x1 == 0) {
         // User mode general protection fault
         let mut process = PROCESSES.current_mut();
 
@@ -324,9 +400,7 @@ extern "x86-interrupt" fn general_protection_fault_handler(
             "EXCEPTION: GENERAL PROTECTION FAULT {:#x?}\n Error code: {}",
             stack_frame, err
         );
-
     }
-
 }
 
 extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
@@ -369,21 +443,10 @@ extern "x86-interrupt" fn page_fault_handler(
             .translate(VirtAddr::new(address.as_u64()));
 
         match mapping {
-            x86_64::structures::paging::mapper::TranslateResult::Mapped {
-                frame,
-                flags,
-                ..
-            } => {
-                log::warn!(
-                    "Page fault in process {} ({err:?}): {stack_frame:#x?}, caused by mapped address {address:#x} ({:x}) with flags {flags:?}",
-                    process.pid(),
-                    frame.start_address(),                    
-                );
+            x86_64::structures::paging::mapper::TranslateResult::Mapped { frame, flags, .. } => {
+                log::warn!("Page fault in process {} ({err:?}): {stack_frame:#x?}, caused by mapped address {address:#x} ({:x}) with flags {flags:?}", process.pid(), frame.start_address(),);
             }
-            x86_64::structures::paging::mapper::TranslateResult::NotMapped => log::warn!(
-                "Page fault in process {} ({err:?}): {stack_frame:#x?}, caused by unmapped address {address:#x}",
-                process.pid(),
-            ),
+            x86_64::structures::paging::mapper::TranslateResult::NotMapped => log::warn!("Page fault in process {} ({err:?}): {stack_frame:#x?}, caused by unmapped address {address:#x}", process.pid(),),
             x86_64::structures::paging::mapper::TranslateResult::InvalidFrameAddress(phys_addr) => {
                 log::warn!("Page fault in process {} ({err:?}): {stack_frame:#x?}, caused by invalid mapping address {address:#x} with physical address {phys_addr:x}", process.pid());
             }
@@ -398,7 +461,7 @@ extern "x86-interrupt" fn page_fault_handler(
             match crate::KERNEL_PAGING.get() {
                 Some(paging) => {
                     paging.force_unlock();
-                },
+                }
                 None => {
                     panic!("page fault before kernel paging was initialized: {err:?} at {stack_frame:#x?}, caused by address {address:#x}");
                 }

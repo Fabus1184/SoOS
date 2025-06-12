@@ -160,6 +160,78 @@ const commands: []const Command = &[_]Command{
             }
         }.exec,
     },
+    .{
+        .name = "gui",
+        .run = struct {
+            fn exec(argc: u32, _: []const []const u8) void {
+                if (argc != 1) {
+                    soos.print("usage: gui\n", .{});
+                    return;
+                }
+                const framebuffer = soos.mapFramebuffer();
+                // Clear framebuffer
+                for (0..framebuffer.height) |y| {
+                    for (0..framebuffer.width) |x| {
+                        framebuffer.ptr[y * framebuffer.width + x] = 0xFF_FFFFFF; // White background
+                    }
+                }
+                var mousePosition: struct { x: u32, y: u32 } = .{ .x = 0, .y = 0 };
+                const cursorColor: u32 = 0xFF_000000; // Blue cursor
+                // Simple 16x16 cursor bitmap
+                const cursorBitmap: [19]u16 = [_]u16{
+                    0b1000000000000000,
+                    0b1100000000000000,
+                    0b1010000000000000,
+                    0b1001000000000000,
+                    0b1000100000000000,
+                    0b1000010000000000,
+                    0b1000001000000000,
+                    0b1000000100000000,
+                    0b1000000010000000,
+                    0b1000000001000000,
+                    0b1000000000100000,
+                    0b1000000000010000,
+                    0b1000000011100000,
+                    0b1000000100000000,
+                    0b1000100010000000,
+                    0b1001010010000000,
+                    0b1010001001000000,
+                    0b1100001001000000,
+                    0b0000000110000000,
+                };
+                const fd = soos.open("/dev/mouse") catch unreachable;
+                while (true) {
+                    var mouseBuffer: [16]soos.events.mouse_event_t = undefined;
+                    const bytesRead = soos.read(fd, @ptrCast(&mouseBuffer)) catch unreachable;
+                    // clear previous mouse cursor
+                    for (0..19) |dy| {
+                        for (0..16) |dx| {
+                            const x = mousePosition.x + dx;
+                            const y = mousePosition.y + dy;
+                            if (x < framebuffer.width and y < framebuffer.height) {
+                                framebuffer.ptr[y * framebuffer.width + x] = 0xFF_FFFFFF; // Restore background color
+                            }
+                        }
+                    }
+                    const events = @as(usize, bytesRead) / @sizeOf(soos.events.mouse_event_t);
+                    for (mouseBuffer[0..events]) |event| {
+                        mousePosition.x = @intCast(@max(@as(i33, mousePosition.x) + event.x_movement, 0));
+                        mousePosition.y = @intCast(@max(@as(i33, mousePosition.y) + event.y_movement, 0));
+                    }
+                    // draw mouse cursor
+                    for (0..19) |dy| {
+                        for (0..16) |dx| {
+                            const x = mousePosition.x + dx;
+                            const y = mousePosition.y + dy;
+                            if (x < framebuffer.width and y < framebuffer.height) {
+                                framebuffer.ptr[y * framebuffer.width + x] = if (cursorBitmap[dy] & (@as(u16, 1) << @intCast(15 - dx)) != 0) cursorColor else 0xFF_FFFFFF; // Draw cursor pixel or restore background
+                            }
+                        }
+                    }
+                }
+            }
+        }.exec,
+    },
 };
 
 fn reset() void {

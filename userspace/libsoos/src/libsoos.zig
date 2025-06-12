@@ -1,5 +1,8 @@
 const std = @import("std");
 const syscalls = @import("syscalls.zig");
+pub const events = @cImport({
+    @cInclude("typedefs/events.h");
+});
 
 const PageAllocator = struct {
     fn alloc(_: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
@@ -279,4 +282,36 @@ pub fn execve(program: []const u8, args: []const []const u8) !noreturn {
     } else {
         @panic("execve should not return, it replaces the current process");
     }
+}
+
+pub const Framebuffer = struct {
+    ptr: [*]u32,
+    width: u32,
+    height: u32,
+
+    pub inline fn blit(self: Framebuffer, x: usize, y: usize, color: u32) void {
+        if (x < self.width and y < self.height) {
+            self.ptr[y * self.width + x] = color;
+        }
+    }
+
+    pub fn clear(self: Framebuffer, color: u32) void {
+        for (0..self.height) |y| {
+            for (0..self.width) |x| {
+                self.ptr[y * self.width + x] = color;
+            }
+        }
+    }
+};
+
+pub fn mapFramebuffer() Framebuffer {
+    var arg = syscalls.types.syscall_map_framebuffer_t{};
+
+    const ret = syscalls.mapFramebuffer(&arg);
+
+    return .{
+        .ptr = @as([*]u32, @alignCast(@ptrCast(ret.addr))),
+        .width = ret.width,
+        .height = ret.height,
+    };
 }
