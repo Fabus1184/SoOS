@@ -28,3 +28,6 @@ x86_64 = { version = "0.15.2", default-features = false, features = [
     "abi_x86_interrupt",
     "instructions",
 ] }
+
+[build-dependencies]
+bindgen = "0.72.0"

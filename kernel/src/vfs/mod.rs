@@ -55,7 +55,9 @@ impl File {
     ) -> Result<usize, crate::io::WriteError> {
         match self {
             File::Regular { contents } => writer.write(&contents[offset..]),
-            File::Special { read, .. } => read(self, offset, &mut writer),
+            File::Special { read, .. } => {
+                read(self, 0, &mut crate::io::Ignorer::ignoring(offset, writer))
+            }
         }
     }
 }

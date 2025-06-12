@@ -13,9 +13,11 @@ pub fn build(b: *std.Build) !void {
 
     const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSmall });
 
-    _ = b.addModule("libsoos", .{
+    const lib = b.addModule("libsoos", .{
         .root_source_file = b.path("src/libsoos.zig"),
         .target = target,
         .optimize = optimize,
     });
+
+    lib.addIncludePath(b.path("../../"));
 }

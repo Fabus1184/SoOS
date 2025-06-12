@@ -1,185 +1,76 @@
-const syscall = enum(u64) {
-    print = 0,
-    sleep = 1,
-    exit = 2,
-    listdir = 3,
-    read = 4,
-    fork = 5,
-    open = 6,
-    close = 7,
-    mmap = 8,
-    munmap = 9,
-    execve = 10,
+const std = @import("std");
+
+pub const types = @cImport({
+    @cInclude("typedefs/types.h");
+});
+
+const Syscall = struct {
+    name: []const u8,
+    number: c_int,
+    arg_type: type,
+    return_type: type,
 };
 
-pub fn print(str: []const u8) void {
-    asm volatile ("int $0x80"
-        : // no output operands
-        : [i] "{rax}" (@intFromEnum(syscall.print)),
-          [str] "{rbx}" (str.ptr),
-          [len] "{rcx}" (str.len),
-        : "rax", "rbx", "rcx"
-    );
-}
+const SYSCALLS: []const Syscall = &[_]Syscall{
+    Syscall{ .name = "print", .number = types.SYSCALL_PRINT, .arg_type = types.syscall_print_t, .return_type = void },
+    Syscall{ .name = "sleep", .number = types.SYSCALL_SLEEP, .arg_type = types.syscall_sleep_t, .return_type = void },
+    Syscall{ .name = "exit", .number = types.SYSCALL_EXIT, .arg_type = types.syscall_exit_t, .return_type = void },
+    Syscall{ .name = "listdir", .number = types.SYSCALL_LISTDIR, .arg_type = types.syscall_listdir_t, .return_type = types.syscall_listdir_return_t },
+    Syscall{ .name = "read", .number = types.SYSCALL_READ, .arg_type = types.syscall_read_t, .return_type = types.syscall_read_return_t },
+    Syscall{ .name = "fork", .number = types.SYSCALL_FORK, .arg_type = types.syscall_fork_t, .return_type = types.syscall_fork_return_t },
+    Syscall{ .name = "open", .number = types.SYSCALL_OPEN, .arg_type = types.syscall_open_t, .return_type = types.syscall_open_return_t },
+    Syscall{ .name = "close", .number = types.SYSCALL_CLOSE, .arg_type = types.syscall_close_t, .return_type = types.syscall_close_return_t },
+    Syscall{ .name = "mmap", .number = types.SYSCALL_MMAP, .arg_type = types.syscall_mmap_t, .return_type = types.syscall_mmap_return_t },
+    Syscall{ .name = "munmap", .number = types.SYSCALL_MUNMAP, .arg_type = types.syscall_munmap_t, .return_type = types.syscall_munmap_return_t },
+    Syscall{ .name = "execve", .number = types.SYSCALL_EXECVE, .arg_type = types.syscall_execve_t, .return_type = types.syscall_execve_return_t },
+};
 
-pub fn sleep(ms: u64) void {
-    asm volatile ("int $0x80"
-        : // no output operands
-        : [i] "{rax}" (@intFromEnum(syscall.sleep)),
-          [ms] "{rbx}" (ms),
-        : "rax", "rbx"
-    );
-}
-
-pub fn exit(code: u64) noreturn {
-    asm volatile ("int $0x80"
-        : // no output operands
-        : [i] "{rax}" (@intFromEnum(syscall.exit)),
-          [code] "{rbx}" (code),
-        : "rax", "rbx"
-    );
-    unreachable; // should not return
-}
-
-pub fn listdir(path: []const u8, index: u64, buffer: []u8) u64 {
-    var result: u64 = 0;
-
-    asm volatile ("int $0x80"
-        : [result] "={rax}" (result),
-        : [i] "{rax}" (@intFromEnum(syscall.listdir)),
-          [path] "{rbx}" (path.ptr),
-          [path_len] "{rcx}" (path.len),
-          [index] "{rdx}" (index),
-          [buffer] "{r8}" (buffer.ptr),
-        : "rax", "rbx", "rcx", "rdx", "r8"
+fn call(comptime syscall: Syscall, arg: *syscall.arg_type) syscall.return_type {
+    asm volatile (
+        \\int $0x80
+        :
+        : [number] "{rax}" (syscall.number),
+          [arg] "{rbx}" (arg),
+        : "rax", "rbx", "memory"
     );
 
-    return result;
-}
-
-pub fn read(fd: u64, buffer: []u8) ?u64 {
-    var result: i64 = 0;
-
-    asm volatile ("int $0x80"
-        : [result] "={rax}" (result),
-        : [i] "{rax}" (@intFromEnum(syscall.read)),
-          [fd] "{rbx}" (fd),
-          [buffer] "{rcx}" (buffer.ptr),
-          [buffer_len] "{rdx}" (buffer.len),
-        : "rax", "rbx", "rcx", "rdx"
-    );
-
-    if (result >= 0) {
-        return @intCast(result);
+    if (syscall.return_type == void) {
+        return;
     } else {
-        return null;
+        return arg.*.return_value;
     }
 }
 
-pub fn fork() u32 {
-    var result: u32 = 0;
-
-    asm volatile ("int $0x80"
-        : [result] "={rax}" (result),
-        : [i] "{rax}" (@intFromEnum(syscall.fork)),
-        : "rax"
-    );
-
-    return result;
+pub fn print(arg: *types.syscall_print_t) void {
+    call(SYSCALLS[0], arg);
 }
-
-pub fn open(path: []const u8) ?u64 {
-    var result: i64 = 0;
-
-    asm volatile ("int $0x80"
-        : [result] "={rax}" (result),
-        : [i] "{rax}" (@intFromEnum(syscall.open)),
-          [path] "{rbx}" (path.ptr),
-          [path_len] "{rcx}" (path.len),
-        : "rax", "rbx", "rcx"
-    );
-
-    if (result >= 0) {
-        return @intCast(result);
-    } else {
-        return null;
-    }
+pub fn sleep(arg: *types.syscall_sleep_t) void {
+    call(SYSCALLS[1], arg);
 }
-
-pub fn close(fd: u64) u64 {
-    var result: u64 = 0;
-
-    asm volatile ("int $0x80"
-        : [result] "={rax}" (result),
-        : [i] "{rax}" (@intFromEnum(syscall.close)),
-          [fd] "{rbx}" (fd),
-        : "rax", "rbx"
-    );
-
-    return result;
+pub fn exit(arg: *types.syscall_exit_t) void {
+    call(SYSCALLS[2], arg);
 }
-
-pub fn mmap() ?struct { ptr: [*]u8, size: u64 } {
-    var ptr: u64 = 0;
-    var size: u64 = 0;
-
-    asm volatile ("int $0x80"
-        : [ptr] "={rax}" (ptr),
-          [size] "={rbx}" (size),
-        : [i] "{rax}" (@intFromEnum(syscall.mmap)),
-        : "rax", "rbx"
-    );
-
-    if (ptr != 0) {
-        return .{ .ptr = @ptrFromInt(ptr), .size = size };
-    } else {
-        return null;
-    }
+pub fn listdir(arg: *types.syscall_listdir_t) types.syscall_listdir_return_t {
+    return call(SYSCALLS[3], arg);
 }
-
-pub fn munmap(ptr: *anyopaque) void {
-    asm volatile ("int $0x80"
-        : // no output operands
-        : [i] "{rax}" (@intFromEnum(syscall.munmap)),
-          [ptr] "{rbx}" (ptr),
-        : "rax", "rbx"
-    );
+pub fn read(arg: *types.syscall_read_t) types.syscall_read_return_t {
+    return call(SYSCALLS[4], arg);
 }
-
-pub fn execve(path: []const u8, argv: []const []const u8) !noreturn {
-    var result: u64 = 0;
-
-    if (argv.len > 64) {
-        return error.TooManyArguments;
-    }
-
-    // Prepare the argv array as length-prefixed strings
-    const Arg = struct {
-        len: u64,
-        ptr: [*]const u8,
-    };
-
-    var argv_array: [64]Arg = undefined;
-    for (argv, 0..) |arg, i| {
-        argv_array[i] = Arg{
-            .ptr = arg.ptr,
-            .len = @intCast(arg.len),
-        };
-    }
-
-    asm volatile ("int $0x80"
-        : [result] "={rax}" (result),
-        : [i] "{rax}" (@intFromEnum(syscall.execve)),
-          [path] "{rbx}" (path.ptr),
-          [path_len] "{rcx}" (path.len),
-          [argv_len] "{rdx}" (argv.len),
-          [argv_array] "{r8}" (@as(*const anyopaque, &argv_array)),
-        : "rax", "rbx", "rcx", "rdx", "r8"
-    );
-
-    if (result != 0) {
-        return error.ExecveFailed;
-    } else {
-        unreachable; // should not return
-    }
+pub fn fork(arg: *types.syscall_fork_t) types.syscall_fork_return_t {
+    return call(SYSCALLS[5], arg);
+}
+pub fn open(arg: *types.syscall_open_t) types.syscall_open_return_t {
+    return call(SYSCALLS[6], arg);
+}
+pub fn close(arg: *types.syscall_close_t) types.syscall_close_return_t {
+    return call(SYSCALLS[7], arg);
+}
+pub fn mmap(arg: *types.syscall_mmap_t) types.syscall_mmap_return_t {
+    return call(SYSCALLS[8], arg);
+}
+pub fn munmap(arg: *types.syscall_munmap_t) types.syscall_munmap_return_t {
+    return call(SYSCALLS[9], arg);
+}
+pub fn execve(arg: *types.syscall_execve_t) types.syscall_execve_return_t {
+    return call(SYSCALLS[10], arg);
 }

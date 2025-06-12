@@ -1,7 +1,35 @@
 pub trait Write {
-    fn write(&mut self, buffer: &[u8]) -> Result<usize, WriteError>;
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, WriteError>;
+}
 
-    fn ignore_next(&mut self, count: usize);
+/// Ignorer is a writer that ignores the first `count` bytes written to it,
+/// then writes the rest to the underlying writer.
+pub struct Ignorer<T: Write> {
+    count: usize,
+    writer: T,
+}
+
+impl<T: Write> Ignorer<T> {
+    pub fn ignoring(count: usize, writer: T) -> Self {
+        Ignorer { count, writer }
+    }
+}
+
+impl<T: Write> Write for Ignorer<T> {
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, WriteError> {
+        if self.count > 0 {
+            let to_ignore = bytes.len().min(self.count);
+            self.count -= to_ignore;
+            if to_ignore == bytes.len() {
+                return Ok(0);
+            }
+            // Ignore the first `to_ignore` bytes
+            self.writer.write(&bytes[to_ignore..])
+        } else {
+            // If nothing to ignore, write the whole buffer
+            self.writer.write(bytes)
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -12,14 +40,12 @@ pub enum WriteError {
 
 pub struct Cursor<'a> {
     position: usize,
-    ignore: usize,
     buffer: &'a mut [u8],
 }
 
 impl<'a> Cursor<'a> {
     pub fn new(buffer: &'a mut [u8]) -> Self {
         Cursor {
-            ignore: 0,
             position: 0,
             buffer,
         }
@@ -27,32 +53,20 @@ impl<'a> Cursor<'a> {
 }
 
 impl Write for Cursor<'_> {
-    fn write(&mut self, buffer: &[u8]) -> Result<usize, WriteError> {
-        if buffer.is_empty() {
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, WriteError> {
+        if bytes.is_empty() {
             return Ok(0);
         }
 
-        let mut len = buffer.len().min(self.buffer.len() - self.position);
+        let len = bytes.len().min(self.buffer.len() - self.position);
 
-        if len == 0 {
-            return Ok(0);
+        if self.position + len > self.buffer.len() {
+            return Err(WriteError::InvalidOffset);
         }
 
-        if len <= self.ignore {
-            self.ignore -= len;
-            return Ok(0);
-        }
+        self.buffer[self.position..self.position + len].copy_from_slice(&bytes[..len]);
 
-        len -= self.ignore;
-        self.ignore = 0;
-
-        self.buffer[self.position..self.position + len].copy_from_slice(&buffer[..len]);
         self.position += len;
-
         Ok(len)
-    }
-
-    fn ignore_next(&mut self, count: usize) {
-        self.ignore += count;
     }
 }

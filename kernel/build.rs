@@ -1,6 +1,6 @@
 use std::ops::Not;
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let outdir = std::env::var("OUT_DIR").expect("failed to get OUT_DIR");
 
     // nasm -f elf64 -o $OUTDIR/assembly.o src/assembly.s
@@ -34,4 +34,6 @@ fn main() {
     println!("cargo:rustc-link-arg=-Tlinker.ld");
     println!("cargo:rerun-if-changed=linker.ld");
     println!("cargo:rerun-if-changed=../userspace");
+
+    Ok(())
 }

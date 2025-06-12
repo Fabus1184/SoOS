@@ -49,7 +49,7 @@ const commands: []const Command = &[_]Command{
     }.clear },
     .{ .name = "exit", .run = struct {
         fn exit(_: u32, _: []const []const u8) void {
-            soos.syscalls.exit(0);
+            soos.exit(0);
         }
     }.exit },
     .{
@@ -60,18 +60,15 @@ const commands: []const Command = &[_]Command{
                     soos.print("usage: ls <directory>\n", .{});
                     return;
                 }
-                var i: u64 = 0;
-                while (true) {
-                    var buffer: [512]u8 = undefined;
-                    const n = soos.syscalls.listdir(argv[1], i, &buffer);
-                    if (n == 0) {
-                        if (i == 0) {
-                            soos.print("Error: Failed to list directory '{s}'\n", .{argv[1]});
-                        }
-                        return;
+                var listDir = soos.listdir(argv[1]) catch |err| {
+                    soos.print("Error: Failed to list directory '{s}': {}\n", .{ argv[1], err });
+                    return;
+                };
+                while (listDir.next()) |entry| {
+                    switch (entry.type) {
+                        .file => soos.print("{s}{s}\n", .{ ANSI_FG_BLUE, entry.name }),
+                        .directory => soos.print("{s}{s}/\n", .{ ANSI_FG_CYAN, entry.name }),
                     }
-                    soos.print("{s}\n", .{buffer[0..n]});
-                    i += 1;
                 }
             }
         }.ls,
@@ -80,10 +77,10 @@ const commands: []const Command = &[_]Command{
         .name = "fork",
         .run = struct {
             fn fork(_: u32, _: []const []const u8) void {
-                const pid = soos.syscalls.fork();
+                const pid = soos.fork();
                 if (pid == 0) {
                     soos.print("Hello from the child process!\n", .{});
-                    soos.syscalls.exit(0);
+                    soos.exit(0);
                 } else {
                     soos.print("Forked child process with PID: {d}\n", .{pid});
                 }
@@ -98,20 +95,24 @@ const commands: []const Command = &[_]Command{
                     soos.print("usage: cat <file>\n", .{});
                     return;
                 }
-                const fd = soos.syscalls.open(argv[1]) orelse {
-                    soos.print("Error: Failed to open file '{s}'\n", .{argv[1]});
+                const fd = soos.open(argv[1]) catch |err| {
+                    soos.print("Error: Failed to open file '{s}': {}\n", .{ argv[1], err });
                     return;
                 };
                 var buffer: [4096]u8 = undefined;
                 var bytes_read: usize = 0;
                 while (true) {
-                    bytes_read = soos.syscalls.read(fd, &buffer) orelse {
-                        soos.print("Error: Failed to read file '{s}'\n", .{argv[1]});
-                        return;
+                    bytes_read = soos.read(fd, &buffer) catch |err| {
+                        std.log.err("Error: Failed to read file '{s}': {}\n", .{ argv[1], err });
+                        @panic("Failed to read file");
                     };
                     if (bytes_read == 0) break; // EOF
                     soos.print("{s}", .{buffer[0..bytes_read]});
                 }
+                soos.close(fd) catch |err| {
+                    soos.print("Error: Failed to close file '{s}': {}\n", .{ argv[1], err });
+                    @panic("Failed to close file");
+                };
             }
         }.cat,
     },
@@ -135,7 +136,7 @@ const commands: []const Command = &[_]Command{
                     for (0..100 + i * 100) |j| {
                         if (testPtr[j] != j) {
                             soos.print("{s}Value mismatch at index {d}, expected {d}, got {d}\n", .{ ANSI_FG_RED, j, j, testPtr[j] });
-                            soos.syscalls.exit(1);
+                            soos.exit(1);
                         }
                     }
                     soos.print("{s}test iteration {d} passed\n", .{ ANSI_FG_GREEN, i });
@@ -153,7 +154,7 @@ const commands: []const Command = &[_]Command{
                 }
                 const program = argv[1];
                 const args = argv[1..argc];
-                soos.syscalls.execve(program, args) catch |err| {
+                soos.execve(program, args) catch |err| {
                     soos.print("Error: Failed to execute '{s}': {}\n", .{ program, err });
                 };
             }
@@ -196,7 +197,7 @@ const DummyMutex = struct {
 
 pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
     std.log.err("{s}panic: {s}\n", .{ ANSI_FG_RED, message });
-    soos.syscalls.exit(1);
+    soos.exit(1);
 }
 
 export fn _start() void {
@@ -208,12 +209,12 @@ export fn _start() void {
 
     while (true) {
         var inputBuffer: [64]u8 = undefined;
-        const inputLength = soos.syscalls.read(0, &inputBuffer) orelse {
-            soos.print("Error: Failed to read input\n", .{});
-            soos.syscalls.exit(1);
+        const inputLength = soos.read(0, &inputBuffer) catch |err| {
+            soos.print("Error: Failed to read input: {}\n", .{err});
+            soos.exit(1);
         };
         if (inputLength == 0) {
-            soos.syscalls.exit(0);
+            soos.exit(0);
         }
 
         soos.print("\x08 \x08", .{});

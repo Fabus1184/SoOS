@@ -58,10 +58,8 @@ pub fn init_fs(fs: &mut Directory) {
 
                     files.insert(
                         String::from("memmap"),
-                        File::special(move |_self, offset, writer| {
+                        File::special(move |_self, _offset, writer| {
                             let mut written = 0;
-
-                            writer.ignore_next(offset);
 
                             let process = PROCESSES.process(pid);
 
@@ -86,28 +84,32 @@ pub fn init_fs(fs: &mut Directory) {
                                         acc = Some((page, size + mapped_page.page.size()));
                                     }
                                     Some((page, size)) => {
-                                        let line = alloc::format!(
-                                            "{:<#16x}{:<#16x}{:<16}{:?}\n",
-                                            page.page.start_address(),
-                                            size,
-                                            page.name,
-                                            page.flags
-                                        );
-                                        written += writer.write(line.as_bytes())?;
+                                        written += writer.write(
+                                            alloc::format!(
+                                                "{:<#16x}{:<#16x}{:<16}{:?}\n",
+                                                page.page.start_address(),
+                                                size,
+                                                page.name,
+                                                page.flags
+                                            )
+                                            .as_bytes(),
+                                        )?;
                                         acc = Some((mapped_page, mapped_page.page.size()));
                                     }
                                 }
                             }
 
                             if let Some((page, size)) = acc {
-                                let line = alloc::format!(
-                                    "{:<#16x}{:<#16x}{:<16}{:?}\n",
-                                    page.page.start_address(),
-                                    size,
-                                    page.name,
-                                    page.flags
-                                );
-                                written += writer.write(line.as_bytes())?;
+                                written += writer.write(
+                                    alloc::format!(
+                                        "{:<#16x}{:<#16x}{:<16}{:?}\n",
+                                        page.page.start_address(),
+                                        size,
+                                        page.name,
+                                        page.flags
+                                    )
+                                    .as_bytes(),
+                                )?;
                             }
 
                             Ok(written)
@@ -124,27 +126,21 @@ pub fn init_fs(fs: &mut Directory) {
 
     fs.create_file(
         "/sys/pci/devices",
-        File::special(|_self, offset, writer| {
-            if offset != 0 {
-                return Err(crate::io::WriteError::InvalidOffset);
-            }
-
+        File::special(|_self, _offset, writer| {
             let mut written = 0;
 
             for dev in crate::driver::pci::scan().expect("Failed to scan PCI devices!") {
-                let line = alloc::format!(
-                    "bus {} device {} function {} class {:?}\n",
-                    dev.bus,
-                    dev.device,
-                    dev.function,
-                    dev.header.class
-                );
-
-                writer.write(line.as_bytes())?;
-                written += line.len();
+                written += writer.write(
+                    alloc::format!(
+                        "bus {} device {} function {} class {:?}\n",
+                        dev.bus,
+                        dev.device,
+                        dev.function,
+                        dev.header.class
+                    )
+                    .as_bytes(),
+                )?;
             }
-
-            writer.write(b"test\n")?;
 
             Ok(written)
         }),
@@ -152,9 +148,7 @@ pub fn init_fs(fs: &mut Directory) {
 
     fs.create_file(
         "/sys/memory",
-        File::special(|_self, offset, writer| {
-            writer.ignore_next(offset);
-
+        File::special(|_self, _offset, writer| {
             let mut written = 0;
 
             let kernel_paging = crate::kernel_paging();
