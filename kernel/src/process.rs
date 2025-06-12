@@ -48,6 +48,7 @@ pub struct Process {
     pub flags: u64,
     pub rip: u64,
     pub registers: crate::idt::GPRegisters,
+    pub xsave: xsave::XSave,
     pub mapped_pages: Vec<MappedPage>,
     file_descriptors: alloc::collections::BTreeMap<i32, Processi32>,
 }
@@ -235,6 +236,7 @@ impl Process {
                 rsp: userspace_stack.as_u64(),
                 ..Default::default()
             },
+            xsave: xsave::XSave::default(),
             mapped_pages,
             file_descriptors,
         }
@@ -330,6 +332,7 @@ impl Process {
             flags: self.flags,
             rip: self.rip,
             registers: self.registers,
+            xsave: self.xsave,
             mapped_pages: self.mapped_pages.clone(),
             file_descriptors: self.file_descriptors.clone(),
         }
@@ -422,6 +425,8 @@ pub fn schedule() -> ! {
 
                 x86_64::instructions::interrupts::disable();
                 process.load_paging();
+
+                process.xsave.load();
 
                 processes.rotate_left(1);
                 drop(processes);

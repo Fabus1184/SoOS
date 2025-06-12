@@ -7,11 +7,11 @@ pub fn build(b: *std.Build) !void {
             .os_tag = .freestanding,
             .abi = .gnu,
             .ofmt = .elf,
-            .cpu_model = .baseline,
+            .cpu_model = .native,
         },
     });
 
-    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSmall });
+    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseFast });
 
     const lib = b.addModule("libsoos", .{
         .root_source_file = b.path("src/libsoos.zig"),

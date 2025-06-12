@@ -186,7 +186,7 @@ irq15:
 global do_iret
 do_iret:
     ; setup iretq
-    
+
     ; push data segment
     push rsi
     ; push rsp from regs

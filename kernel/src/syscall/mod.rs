@@ -299,7 +299,7 @@ fn mmap(pid: u32, arg: &mut generated::syscall_mmap_t) {
         .iter()
         .filter(|&m| m.page.start_address().as_u64() >= START_ADDRESS)
         .max_by_key(|&m| m.page.start_address().as_u64())
-        .map_or(START_ADDRESS, |&m| m.page.start_address().as_u64() + 4096);
+        .map_or(START_ADDRESS, |&m| m.page.start_address().as_u64() + 0x1000);
     let page = Page::containing_address(x86_64::VirtAddr::new(address));
 
     log::debug!(
@@ -425,12 +425,7 @@ fn map_framebuffer(pid: u32, arg: &mut generated::syscall_map_framebuffer_t) {
         .expect("Failed to translate framebuffer address");
     let start_phys_frame = start_phys_address.align_down(Size4KiB::SIZE);
 
-    let start_address = process
-        .mapped_pages
-        .iter()
-        .map(|&m| m.page.start_address().align_up(Size4KiB::SIZE).as_u64() + 0x1000)
-        .max()
-        .unwrap_or(0x6942_0000_0000);
+    let start_address = 0x3333_4444_0000;
 
     log::debug!(
         "mapping framebuffer at {start_address:#x} to {start_phys_frame:#x} ({start_phys_address:#x}) with size {size} bytes",
@@ -439,7 +434,9 @@ fn map_framebuffer(pid: u32, arg: &mut generated::syscall_map_framebuffer_t) {
     let flags = PageTableFlags::PRESENT
         | PageTableFlags::WRITABLE
         | PageTableFlags::USER_ACCESSIBLE
-        | PageTableFlags::NO_EXECUTE;
+        | PageTableFlags::NO_EXECUTE
+        // WT bit so PAT index is 1
+        | PageTableFlags::WRITE_THROUGH;
 
     let mut mapped = 0;
     while mapped < size {

@@ -163,22 +163,16 @@ const Window = struct {
         // draw border
         const border_color = 0xFF_000000; // Black border
         for (0..self.width) |x| {
-            framebuffer.blit(self.position.x + x, self.position.y + titlebar_height, border_color); // Top border
-            framebuffer.blit(self.position.x + x, self.position.y + titlebar_height + self.height - 1, border_color); // Bottom border
+            framebuffer.blit(self.position.x + x, self.position.y, border_color); // Top border
+            framebuffer.blit(self.position.x + x, self.position.y + self.height - 1, border_color); // Bottom border
         }
         for (0..self.height) |y| {
-            framebuffer.blit(self.position.x, self.position.y + y + titlebar_height, border_color); // Left border
-            framebuffer.blit(self.position.x + self.width - 1, self.position.y + y + titlebar_height, border_color); // Right border
+            framebuffer.blit(self.position.x, self.position.y + y, border_color); // Left border
+            framebuffer.blit(self.position.x + self.width - 1, self.position.y + y, border_color); // Right border
         }
 
         // draw window contents
-        for (0..self.height) |y| {
-            const content_y = self.position.y + y + titlebar_height;
-            for (0..self.width) |x| {
-                const content_x = self.position.x + x;
-                framebuffer.blit(content_x, content_y, self.contents[y * self.width + x]);
-            }
-        }
+        framebuffer.copy(self.contents, self.position.x, self.position.y + titlebar_height, self.width, self.height - titlebar_height);
     }
 };
 
@@ -207,6 +201,12 @@ fn main() !void {
     const framebuffer = soos.mapFramebuffer();
     framebuffer.clear(0xFF_EEEEEE);
 
+    const buffer = soos.Framebuffer{
+        .ptr = try allocator.alloc(u32, framebuffer.width * framebuffer.height),
+        .width = framebuffer.width,
+        .height = framebuffer.height,
+    };
+
     var mousePosition = Position{ .x = framebuffer.width / 2, .y = framebuffer.height / 2 };
     var mouseState: struct {
         left_button: bool = false,
@@ -228,7 +228,7 @@ fn main() !void {
         mousePosition.x = @min(mousePosition.x, framebuffer.width - 1);
         mousePosition.y = @min(mousePosition.y, framebuffer.height - 1);
 
-        framebuffer.clear(0xFF_EEEEEE);
+        buffer.clear(0xFF_EEEEEE);
 
         for (windows.items) |*window| {
             if (window.cursorOverTitlebar(mousePosition) and mouseState.left_button) {
@@ -237,9 +237,12 @@ fn main() !void {
                 window.position.y = @intCast(@max(mousePosition.y - 20, 0)); // Titlebar height
             }
 
-            window.draw(framebuffer);
+            window.draw(buffer);
         }
 
-        drawCursor(mousePosition, framebuffer);
+        drawCursor(mousePosition, buffer);
+
+        // Copy the buffer to the framebuffer
+        framebuffer.copy(buffer.ptr, 0, 0, buffer.width, buffer.height);
     }
 }

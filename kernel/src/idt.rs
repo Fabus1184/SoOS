@@ -140,6 +140,7 @@ pub unsafe extern "C" fn syscall_handler(
         rsp: stack_frame.stack_pointer.as_u64(),
         ..registers
     };
+    process.xsave.save();
 
     let pid = process.pid();
 
@@ -163,6 +164,10 @@ extern "C" fn irq_handler(
     stack_frame: InterruptStackFrame,
 ) {
     trace!("irq_handler begin: irq {irq:0x?}, stack_frame {stack_frame:0x?}, registers {registers:0x?}");
+
+    {
+        crate::process::PROCESSES.current_mut().xsave.save();
+    }
 
     match irq {
         0 => unsafe {
@@ -327,6 +332,8 @@ extern "C" fn irq_handler(
 
     trace!("irq_handler end");
 
+    crate::process::PROCESSES.current().xsave.load();
+
     unsafe {
         crate::do_iret(
             u64::from(stack_frame.code_segment.0),
@@ -334,7 +341,7 @@ extern "C" fn irq_handler(
             stack_frame.cpu_flags.bits(),
             stack_frame.instruction_pointer.as_u64(),
             &GPRegisters {
-                rsp: stack_frame.stack_pointer.as_u64(),
+                rsp: stack_frame.stack_pointer.as_u64() - 0x8,
                 ..registers
             },
         )
@@ -386,7 +393,7 @@ extern "x86-interrupt" fn general_protection_fault_handler(
         process.state = crate::process::State::Terminated(1);
 
         log::warn!(
-            "User mode general protection fault in process {}: {:#x?}, error code: {}",
+            "user mode general protection fault in process {}: {:#x?}, error code: {}",
             process.pid(),
             stack_frame,
             err
@@ -451,7 +458,6 @@ extern "x86-interrupt" fn page_fault_handler(
                 log::warn!("Page fault in process {} ({err:?}): {stack_frame:#x?}, caused by invalid mapping address {address:#x} with physical address {phys_addr:x}", process.pid());
             }
         }
-        log::warn!("{:x?}", process.registers);
 
         drop(process);
 

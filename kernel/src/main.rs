@@ -34,7 +34,10 @@ use log::{debug, info, LevelFilter};
 
 use x86_64::{
     instructions::tables,
-    registers::segmentation::{Segment, CS, DS, ES, FS, GS, SS},
+    registers::{
+        control::Cr0Flags,
+        segmentation::{Segment, CS, DS, ES, FS, GS, SS},
+    },
     structures::{
         gdt::{Descriptor, GlobalDescriptorTable},
         paging::{OffsetPageTable, Page},
@@ -242,6 +245,30 @@ unsafe extern "C" fn main() -> ! {
             )),
         ))
     });
+
+    // set up PAT entry 1 for write-combined framebuffer memory
+    unsafe {
+        let mut pat = x86_64::registers::model_specific::Msr::new(0x277);
+        let write_combining = 0x01;
+        pat.write(pat.read() | (write_combining << 8));
+    }
+
+    // enable SSE, AVX, and x87 instructions
+    x86_64::registers::control::Cr0::update(|f| {
+        f.remove(Cr0Flags::EMULATE_COPROCESSOR);
+        f.insert(Cr0Flags::MONITOR_COPROCESSOR);
+    });
+    x86_64::registers::control::Cr4::update(|f| {
+        f.insert(x86_64::registers::control::Cr4Flags::OSFXSR);
+        f.insert(x86_64::registers::control::Cr4Flags::OSXMMEXCPT_ENABLE);
+        f.insert(x86_64::registers::control::Cr4Flags::OSXSAVE);
+    });
+    x86_64::registers::xcontrol::XCr0::write(
+        x86_64::registers::xcontrol::XCr0::read()
+            | x86_64::registers::xcontrol::XCr0Flags::AVX
+            | x86_64::registers::xcontrol::XCr0Flags::SSE
+            | x86_64::registers::xcontrol::XCr0Flags::X87,
+    );
 
     // no allocation before this point!
     {

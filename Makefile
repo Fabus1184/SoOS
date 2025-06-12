@@ -47,5 +47,10 @@ build/SoOS.iso: build/iso-root $(LIMINE_FILES) $(LIMINE_BIN) $(KERNEL)
 
 run: build/SoOS.iso
 	qemu-system-x86_64 \
-		-cpu qemu64,+la57 -cdrom build/SoOS.iso -d guest_errors,cpu_reset -m 8G -M smm=off -s \
+		-cpu max -cdrom build/SoOS.iso -d guest_errors,cpu_reset -m 8G -s \
 		-no-shutdown -no-reboot
+
+run-gdb: build/SoOS.iso
+	qemu-system-x86_64 \
+		-cpu max -cdrom build/SoOS.iso -d guest_errors,cpu_reset -m 8G -s \
+		-no-shutdown -no-reboot -S

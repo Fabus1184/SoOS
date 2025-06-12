@@ -285,7 +285,7 @@ pub fn execve(program: []const u8, args: []const []const u8) !noreturn {
 }
 
 pub const Framebuffer = struct {
-    ptr: [*]u32,
+    ptr: []u32,
     width: u32,
     height: u32,
 
@@ -302,6 +302,14 @@ pub const Framebuffer = struct {
             }
         }
     }
+
+    pub fn copy(self: Framebuffer, src: []u32, dst_x: usize, dst_y: usize, src_width: usize, src_height: usize) void {
+        for (0..src_height) |y| {
+            for (0..src_width) |x| {
+                self.blit(dst_x + x, dst_y + y, src[y * src_width + x]);
+            }
+        }
+    }
 };
 
 pub fn mapFramebuffer() Framebuffer {
@@ -310,7 +318,7 @@ pub fn mapFramebuffer() Framebuffer {
     const ret = syscalls.mapFramebuffer(&arg);
 
     return .{
-        .ptr = @as([*]u32, @alignCast(@ptrCast(ret.addr))),
+        .ptr = @as([*]u32, @alignCast(@ptrCast(ret.addr)))[0 .. ret.width * ret.height * 4],
         .width = ret.width,
         .height = ret.height,
     };
