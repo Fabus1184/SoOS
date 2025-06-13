@@ -271,8 +271,8 @@ extern "C" fn irq_handler(
                 let byte2 = unsafe { <u8 as PortRead>::read_from_port(0x60) };
                 let byte3 = unsafe { <u8 as PortRead>::read_from_port(0x60) };
 
-                let right_button = byte1 & 0b0000_0001 != 0;
-                let left_button = byte1 & 0b0000_0010 != 0;
+                let right_button = byte1 & 0b0000_0010 != 0;
+                let left_button = byte1 & 0b0000_0001 != 0;
                 let x_movement = if byte1 & 0b0000_0100 == 0 {
                     byte2 as i8
                 } else {
@@ -341,7 +341,7 @@ extern "C" fn irq_handler(
             stack_frame.cpu_flags.bits(),
             stack_frame.instruction_pointer.as_u64(),
             &GPRegisters {
-                rsp: stack_frame.stack_pointer.as_u64() - 0x8,
+                rsp: stack_frame.stack_pointer.as_u64(),
                 ..registers
             },
         )

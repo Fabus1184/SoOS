@@ -296,18 +296,103 @@ pub const Framebuffer = struct {
     }
 
     pub fn clear(self: Framebuffer, color: u32) void {
-        for (0..self.height) |y| {
-            for (0..self.width) |x| {
-                self.ptr[y * self.width + x] = color;
+        const Vec4 = @Vector(128, u32);
+        const vec_color: Vec4 = @splat(color);
+
+        const ptr: [*]Vec4 = @alignCast(@ptrCast(self.ptr.ptr));
+        const chunks = self.ptr.len / 128;
+
+        for (0..chunks) |i| {
+            ptr[i] = vec_color;
+        }
+
+        const remaining = self.ptr.len % 128;
+        if (remaining > 0) {
+            const start = chunks * 128;
+            for (0..remaining) |j| {
+                self.ptr[start + j] = color;
             }
         }
     }
 
     pub fn copy(self: Framebuffer, src: []u32, dst_x: usize, dst_y: usize, src_width: usize, src_height: usize) void {
+        if (dst_x + src_width > self.width or dst_y + src_height > self.height) {
+            @panic("copy operation exceeds framebuffer bounds");
+        }
+
         for (0..src_height) |y| {
-            for (0..src_width) |x| {
-                self.blit(dst_x + x, dst_y + y, src[y * src_width + x]);
+            const src_row_start = y * src_width;
+            const dst_row_start = (dst_y + y) * self.width + dst_x;
+
+            @memcpy(
+                self.ptr[dst_row_start .. dst_row_start + src_width],
+                src[src_row_start .. src_row_start + src_width],
+            );
+        }
+    }
+
+    pub fn fillRect(self: Framebuffer, x: usize, y: usize, width: usize, height: usize, color: u32, cornerRadius: [4]usize) void {
+        if (x + width > self.width or y + height > self.height) {
+            @panic("fillRect operation exceeds framebuffer bounds");
+        }
+
+        // draw top left corner
+        for (0..cornerRadius[0]) |i| {
+            for (0..cornerRadius[0]) |j| {
+                if (i * i + j * j <= cornerRadius[0] * cornerRadius[0]) {
+                    self.blit(x + cornerRadius[0] - i - 1, y + cornerRadius[0] - j - 1, color);
+                }
             }
+        }
+        // draw top right corner
+        for (0..cornerRadius[1]) |i| {
+            for (0..cornerRadius[1]) |j| {
+                if (i * i + j * j <= cornerRadius[1] * cornerRadius[1]) {
+                    self.blit(x + width - cornerRadius[1] + i, y + cornerRadius[1] - j - 1, color);
+                }
+            }
+        }
+        // draw bottom left corner
+        for (0..cornerRadius[2]) |i| {
+            for (0..cornerRadius[2]) |j| {
+                if (i * i + j * j <= cornerRadius[2] * cornerRadius[2]) {
+                    self.blit(x + cornerRadius[2] - i - 1, y + height - cornerRadius[2] + j, color);
+                }
+            }
+        }
+        // draw bottom right corner
+        for (0..cornerRadius[3]) |i| {
+            for (0..cornerRadius[3]) |j| {
+                if (i * i + j * j <= cornerRadius[3] * cornerRadius[3]) {
+                    self.blit(x + width - cornerRadius[3] + i, y + height - cornerRadius[3] + j, color);
+                }
+            }
+        }
+
+        for (0..height) |y_| {
+            var start_x = x;
+            var end_x = x + width - 1;
+            // check for intersection with top left corner
+            if (y_ < cornerRadius[0]) {
+                start_x += cornerRadius[0] - y_;
+            }
+            // check for intersection with top right corner
+            if (y_ < cornerRadius[1]) {
+                end_x -= cornerRadius[1] - y_;
+            }
+            // check for intersection with bottom left corner
+            if (y_ >= height - cornerRadius[2]) {
+                start_x += cornerRadius[2] - (height - y_ - 1);
+            }
+            // check for intersection with bottom right corner
+            if (y_ >= height - cornerRadius[3]) {
+                end_x -= cornerRadius[3] - (height - y_ - 1);
+            }
+
+            @memset(
+                self.ptr[(y + y_) * self.width + start_x .. (y + y_) * self.width + end_x + 1],
+                color,
+            );
         }
     }
 };
@@ -318,7 +403,7 @@ pub fn mapFramebuffer() Framebuffer {
     const ret = syscalls.mapFramebuffer(&arg);
 
     return .{
-        .ptr = @as([*]u32, @alignCast(@ptrCast(ret.addr)))[0 .. ret.width * ret.height * 4],
+        .ptr = @as([*]u32, @alignCast(@ptrCast(ret.addr)))[0 .. ret.width * ret.height],
         .width = ret.width,
         .height = ret.height,
     };

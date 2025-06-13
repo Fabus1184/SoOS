@@ -109,7 +109,7 @@ pub fn load(
     }
 
     // create stack
-    let stack_size_pages = 10;
+    let stack_size_pages = 100;
     let stack_address = VirtAddr::new(0x0000_1000_0000_0000);
     let flags = PageTableFlags::PRESENT
         | PageTableFlags::WRITABLE

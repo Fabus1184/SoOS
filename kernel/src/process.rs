@@ -394,7 +394,11 @@ pub fn schedule() -> ! {
 
         processes.retain(|p| !matches!(p.state, State::Terminated(_)));
 
-        assert!(!processes.is_empty(), "No processes left to schedule!");
+        if processes.is_empty() {
+            log::warn!("no processes left to schedule, halting...");
+            x86_64::instructions::interrupts::disable();
+            x86_64::instructions::hlt();
+        }
 
         let len = processes.len();
         drop(processes);

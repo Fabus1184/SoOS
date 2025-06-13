@@ -1,3 +1,6 @@
 [submodule "limine"]
 	path = limine
 	url = git@github.com:limine-bootloader/limine.git
+[submodule "userspace/sogui/clay"]
+	path = userspace/sogui/clay
+	url = git@github.com:nicbarker/clay.git
