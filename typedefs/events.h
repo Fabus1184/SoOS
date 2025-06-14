@@ -1,5 +1,7 @@
 #include <stdint.h>
 
+#include "types.h"
+
 struct __attribute__((packed)) mouse_event_t {
     int8_t x_movement;
     int8_t y_movement;

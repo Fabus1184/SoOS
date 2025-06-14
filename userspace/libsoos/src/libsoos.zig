@@ -1,7 +1,12 @@
 const std = @import("std");
+
 const syscalls = @import("syscalls.zig");
+
 pub const events = @cImport({
     @cInclude("typedefs/events.h");
+});
+pub const types = @cImport({
+    @cInclude("typedefs/types.h");
 });
 
 const PageAllocator = struct {
@@ -158,10 +163,11 @@ pub fn listdir(path: []const u8) !ListDir {
     return listDir;
 }
 
-pub fn read(fd: i32, buffer: []u8) !usize {
+pub fn read(fd: i32, buffer: []u8, blocking: bool) !usize {
     var arg = syscalls.types.syscall_read_t{
         .fd = fd,
         .buf = buffer.ptr,
+        .options = if (blocking) syscalls.types.SYSCALL_READ_OPTION_NONE else syscalls.types.SYSCALL_READ_OPTION_NON_BLOCKING,
         .len = @intCast(buffer.len),
     };
 
@@ -407,4 +413,40 @@ pub fn mapFramebuffer() Framebuffer {
         .width = ret.width,
         .height = ret.height,
     };
+}
+
+pub fn write(fd: i32, buffer: []const u8) !usize {
+    var arg = syscalls.types.syscall_write_t{
+        .fd = fd,
+        .buf = buffer.ptr,
+        .len = @intCast(buffer.len),
+    };
+
+    const ret = syscalls.write(&arg);
+
+    if (ret.@"error" != syscalls.types.SYSCALL_WRITE_ERROR_NONE) {
+        return switch (ret.@"error") {
+            syscalls.types.SYSCALL_WRITE_ERROR_INVALID_FD => error.InvalidFd,
+            else => @panic("write unexpected error"),
+        };
+    }
+
+    return @intCast(ret.bytes_written);
+}
+
+pub fn waitpid(pid: u32) !u32 {
+    var arg = syscalls.types.syscall_waitpid_t{
+        .pid = pid,
+    };
+
+    const ret = syscalls.waitpid(&arg);
+
+    if (ret.@"error" != syscalls.types.SYSCALL_WAITPID_ERROR_NONE) {
+        return switch (ret.@"error") {
+            syscalls.types.SYSCALL_WAITPID_ERROR_INVALID_PID => error.InvalidPid,
+            else => @panic("waitpid unexpected error"),
+        };
+    }
+
+    return ret.status;
 }

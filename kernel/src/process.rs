@@ -12,7 +12,7 @@ struct PidFactory {
 impl PidFactory {
     pub const fn new() -> Self {
         PidFactory {
-            next_pid: AtomicU32::new(0),
+            next_pid: AtomicU32::new(1),
         }
     }
 
@@ -29,6 +29,10 @@ pub enum State {
     Ready,
     Sleeping(u64),
     WaitingForStream(i32),
+    WaitingForChild {
+        pid: u32,
+        arg: *mut crate::syscall::generated::syscall_waitpid_t,
+    },
     Terminated(u64),
 }
 
@@ -43,34 +47,44 @@ pub struct Process {
     pid: u32,
     pub state: State,
     pub paging: UserspacePaging<'static>,
-    cs: x86_64::structures::gdt::SegmentSelector,
-    ds: x86_64::structures::gdt::SegmentSelector,
+    pub cs: x86_64::structures::gdt::SegmentSelector,
+    pub ds: x86_64::structures::gdt::SegmentSelector,
     pub flags: u64,
     pub rip: u64,
     pub registers: crate::idt::GPRegisters,
     pub xsave: xsave::XSave,
     pub mapped_pages: Vec<MappedPage>,
-    file_descriptors: alloc::collections::BTreeMap<i32, Processi32>,
+    file_descriptors: alloc::collections::BTreeMap<i32, FileDescriptor>,
 }
 
 #[derive(Debug, Clone)]
-pub enum Processi32 {
+pub enum FileDescriptor {
     Regular {
         path: alloc::string::String,
         offset: usize,
     },
-    Stream {
+    ForeignStream {
+        stream_type: ForeignStreamType,
+    },
+    OwnedStream {
         buffer: VecDeque<u8>,
         max_size: usize,
-        stream_type: StreamType,
+        stream_type: OwnedStreamType,
     },
+    Terminal,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StreamType {
+pub enum OwnedStreamType {
     Stdin,
+    Stdout,
     Keyboard,
     Mouse,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForeignStreamType {
+    Process { pid: u32, file_descriptor: i32 },
 }
 
 pub struct Processes {
@@ -90,7 +104,7 @@ impl Processes {
                 processes
                     .iter()
                     .find(|p| p.pid == pid)
-                    .expect("Process not found")
+                    .unwrap_or_else(|| panic!("process {pid} not found"))
             },
         )
     }
@@ -106,7 +120,7 @@ impl Processes {
                 processes
                     .iter_mut()
                     .find(|p| p.pid == pid)
-                    .expect("Process not found")
+                    .unwrap_or_else(|| panic!("process {pid} not found"))
             },
         )
     }
@@ -124,8 +138,7 @@ impl Processes {
         processes
             .iter()
             .find(|p| p.pid == pid)
-            .map(f)
-            .expect("Process not found")
+            .map_or_else(|| panic!("process {pid} not found"), f)
     }
 
     #[track_caller]
@@ -141,8 +154,7 @@ impl Processes {
         processes
             .iter_mut()
             .find(|p| p.pid == pid)
-            .map(f)
-            .expect("Process not found")
+            .map_or_else(|| panic!("process {pid} not found"), f)
     }
 
     #[track_caller]
@@ -161,26 +173,24 @@ impl Processes {
             .expect("Failed to borrow processes")
     }
 
-    pub fn current(&self) -> core::cell::Ref<'_, Process> {
+    #[track_caller]
+    pub fn current(&self) -> Option<core::cell::Ref<'_, Process>> {
         let pid = self.current_pid.load(core::sync::atomic::Ordering::Relaxed);
 
-        core::cell::Ref::map(self.processes(), |processes| {
-            processes
-                .iter()
-                .find(|p| p.pid == pid)
-                .expect("Current process not found")
+        core::cell::Ref::filter_map(self.processes(), |processes| {
+            processes.iter().find(|p| p.pid == pid)
         })
+        .ok()
     }
 
-    pub fn current_mut(&self) -> core::cell::RefMut<'_, Process> {
+    #[track_caller]
+    pub fn current_mut(&self) -> Option<core::cell::RefMut<'_, Process>> {
         let pid = self.current_pid.load(core::sync::atomic::Ordering::Relaxed);
 
-        core::cell::RefMut::map(self.processes_mut(), |processes| {
-            processes
-                .iter_mut()
-                .find(|p| p.pid == pid)
-                .expect("Current process not found")
+        core::cell::RefMut::filter_map(self.processes_mut(), |processes| {
+            processes.iter_mut().find(|p| p.pid == pid)
         })
+        .ok()
     }
 
     pub fn add_process(&self, process: Process) {
@@ -188,6 +198,30 @@ impl Processes {
     }
 }
 unsafe impl Sync for Processes {}
+
+pub fn store_state(
+    registers: crate::idt::GPRegisters,
+    stack_frame: &x86_64::structures::idt::InterruptStackFrame,
+) -> Option<u32> {
+    let mut process = PROCESSES.current_mut()?;
+
+    process.flags = stack_frame.cpu_flags.bits();
+    process.rip = stack_frame.instruction_pointer.as_u64();
+    process.registers = crate::idt::GPRegisters {
+        rsp: stack_frame.stack_pointer.as_u64(),
+        ..registers
+    };
+    process.xsave.save();
+
+    let pid = PROCESSES
+        .current_pid
+        .load(core::sync::atomic::Ordering::Relaxed);
+    PROCESSES
+        .current_pid
+        .store(0, core::sync::atomic::Ordering::Relaxed);
+
+    Some(pid)
+}
 
 pub static PROCESSES: Processes = Processes {
     processes: RefCell::new(VecDeque::new()),
@@ -210,17 +244,25 @@ impl Process {
         let mut userspace_paging = kernel_paging.make_userspace_paging();
 
         let (userspace_address, userspace_stack, mapped_pages) =
-            crate::elf::load(&mut userspace_paging, &mut kernel_paging, elf);
+            crate::elf::load::<&str>(&mut userspace_paging, &mut kernel_paging, elf, &[]);
 
         log::debug!("elf for pid {pid} loaded at address {userspace_address:#x}, stack at {userspace_stack:#x}");
 
         let mut file_descriptors = alloc::collections::BTreeMap::new();
         file_descriptors.insert(
             0,
-            Processi32::Stream {
+            FileDescriptor::OwnedStream {
                 buffer: alloc::collections::vec_deque::VecDeque::new(),
                 max_size: 1024,
-                stream_type: StreamType::Keyboard,
+                stream_type: OwnedStreamType::Stdin,
+            },
+        );
+        file_descriptors.insert(
+            1,
+            FileDescriptor::OwnedStream {
+                buffer: alloc::collections::vec_deque::VecDeque::new(),
+                max_size: 1024,
+                stream_type: OwnedStreamType::Stdout,
             },
         );
 
@@ -242,7 +284,7 @@ impl Process {
         }
     }
 
-    pub fn execve(&mut self, elf: &[u8]) {
+    pub fn execve<T: AsRef<str>>(&mut self, elf: &[u8], args: &[T]) {
         log::debug!("execve for pid {}", self.pid);
 
         let mut kernel_paging = crate::kernel_paging();
@@ -255,12 +297,12 @@ impl Process {
                 .expect("Failed to unmap page");
             flush.flush();
             unsafe {
-                kernel_paging.frame_allocator.deallocate_frame(frame);
+                kernel_paging.deallocate_frame(frame);
             }
         }
 
         let (userspace_address, userspace_stack, mapped_pages) =
-            crate::elf::load(&mut self.paging, &mut kernel_paging, elf);
+            crate::elf::load(&mut self.paging, &mut kernel_paging, elf, args);
 
         log::debug!(
             "elf for pid {} loaded at address {:#x}, stack at {:#x}",
@@ -292,29 +334,52 @@ impl Process {
                 }
             }
             State::WaitingForStream(fd) => {
-                let fd = process
+                let file_descriptor = process
                     .file_descriptors
                     .get(&fd)
                     .expect("File descriptor not found");
 
-                match fd {
-                    Processi32::Stream { buffer, .. } => {
+                match file_descriptor {
+                    FileDescriptor::OwnedStream { buffer, .. } => {
                         if !buffer.is_empty() {
                             drop(process);
                             crate::syscall::handle_syscall(pid);
                             PROCESSES.process_mut(pid).state = State::Ready;
                         }
                     }
-                    Processi32::Regular { .. } => {
+                    FileDescriptor::Regular { .. } => {
                         panic!("cannot wait for regular file descriptor")
                     }
+                    FileDescriptor::ForeignStream { stream_type } => match stream_type {
+                        &ForeignStreamType::Process {
+                            pid: other_pid,
+                            file_descriptor,
+                        } => {
+                            drop(process);
+                            let other_process = PROCESSES.process(other_pid);
+                            let fd = other_process
+                                .file_descriptor(file_descriptor)
+                                .expect("File descriptor not found");
+                            match fd {
+                                FileDescriptor::OwnedStream { buffer, .. } => {
+                                    if !buffer.is_empty() {
+                                        drop(other_process);
+                                        crate::syscall::handle_syscall(pid);
+                                        PROCESSES.process_mut(pid).state = State::Ready;
+                                    }
+                                }
+                                e => panic!("cannot wait for foreign file descriptor: {:?}", e,),
+                            }
+                        }
+                    },
+                    FileDescriptor::Terminal => todo!(),
                 }
             }
             _ => {}
         }
     }
 
-    pub fn load_paging(&mut self) {
+    pub fn load_paging(&self) {
         self.paging.load();
     }
 
@@ -338,30 +403,46 @@ impl Process {
         }
     }
 
-    pub fn new_file_descriptor(&mut self, fd: Processi32) -> i32 {
+    pub fn new_file_descriptor(&mut self, fd: FileDescriptor) -> i32 {
         let file_descriptor = self.file_descriptors.keys().max().map_or(0, |max| max + 1);
         self.file_descriptors.insert(file_descriptor, fd);
         file_descriptor
     }
 
-    pub fn close_file_descriptor(&mut self, fd: i32) -> Option<Processi32> {
+    pub fn close_file_descriptor(&mut self, fd: i32) -> Option<FileDescriptor> {
         self.file_descriptors.remove(&fd)
     }
 
-    pub fn file_descriptor(&self, fd: i32) -> Option<&Processi32> {
+    pub fn file_descriptor(&self, fd: i32) -> Option<&FileDescriptor> {
         self.file_descriptors.get(&fd)
     }
 
-    pub fn file_descriptor_mut(&mut self, fd: i32) -> Option<&mut Processi32> {
+    pub fn file_descriptor_mut(&mut self, fd: i32) -> Option<&mut FileDescriptor> {
         self.file_descriptors.get_mut(&fd)
     }
 
-    pub fn file_descriptors(&self) -> impl Iterator<Item = (&i32, &Processi32)> {
+    pub fn file_descriptors(&self) -> impl Iterator<Item = (&i32, &FileDescriptor)> {
         self.file_descriptors.iter()
     }
 
-    pub fn file_descriptors_mut(&mut self) -> impl Iterator<Item = (&i32, &mut Processi32)> {
+    pub fn file_descriptors_mut(&mut self) -> impl Iterator<Item = (&i32, &mut FileDescriptor)> {
         self.file_descriptors.iter_mut()
+    }
+
+    pub fn redirect_stdout_to_term(&mut self) {
+        *self
+            .file_descriptor_mut(1)
+            .expect("File descriptor 1 not found") = FileDescriptor::Terminal;
+    }
+
+    pub fn redirect_keyboard_to_stdin(&mut self) {
+        *self
+            .file_descriptor_mut(0)
+            .expect("File descriptor 0 not found") = FileDescriptor::OwnedStream {
+            buffer: alloc::collections::vec_deque::VecDeque::new(),
+            max_size: 1024,
+            stream_type: OwnedStreamType::Keyboard,
+        };
     }
 }
 
@@ -379,7 +460,7 @@ impl Drop for Process {
             flush.flush();
 
             unsafe {
-                kernel_paging.frame_allocator.deallocate_frame(frame);
+                kernel_paging.deallocate_frame(frame);
             }
         }
     }
@@ -416,28 +497,12 @@ pub fn schedule() -> ! {
 
             if process.state == State::Ready {
                 log::trace!("scheduling {}", process.pid);
-
-                PROCESSES
-                    .current_pid
-                    .store(process.pid, core::sync::atomic::Ordering::Relaxed);
-
-                let cs = u64::from(process.cs.0);
-                let ds = u64::from(process.ds.0);
-                let flags = process.flags;
-                let rip = process.rip;
-                let registers = process.registers;
-
-                x86_64::instructions::interrupts::disable();
-                process.load_paging();
-
-                process.xsave.load();
+                let pid = process.pid;
 
                 processes.rotate_left(1);
                 drop(processes);
 
-                unsafe {
-                    crate::do_iret(cs, ds, flags, rip, &raw const registers);
-                }
+                iret(pid)
             } else {
                 processes.rotate_left(1);
             }
@@ -449,5 +514,47 @@ pub fn schedule() -> ! {
 
         x86_64::instructions::interrupts::enable();
         x86_64::instructions::hlt();
+    }
+}
+
+extern "C" {
+    pub fn do_iret(
+        cs: u64,
+        ds: u64,
+        flags: u64,
+        rip: u64,
+        regs: *const crate::idt::GPRegisters,
+    ) -> !;
+}
+
+pub fn iret(pid: u32) -> ! {
+    x86_64::instructions::interrupts::disable();
+
+    PROCESSES
+        .current_pid
+        .store(pid, core::sync::atomic::Ordering::Relaxed);
+
+    let process = PROCESSES.process(pid);
+
+    let flags = process.flags;
+    let rip = process.rip;
+    let registers = process.registers;
+    let cs = process.cs;
+    let ds = process.ds;
+
+    process.xsave.load();
+
+    process.load_paging();
+
+    drop(process);
+
+    unsafe {
+        do_iret(
+            u64::from(cs.0),
+            u64::from(ds.0),
+            flags,
+            rip,
+            &raw const registers,
+        );
     }
 }

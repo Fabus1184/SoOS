@@ -1,6 +1,6 @@
 use alloc::string::{String, ToString as _};
 
-use crate::process::StreamType;
+use crate::process::{ForeignStreamType, OwnedStreamType};
 
 pub mod root;
 
@@ -35,8 +35,11 @@ pub enum File {
         >,
         write: (),
     },
-    Stream {
-        stream_type: StreamType,
+    OwnedStream {
+        stream_type: OwnedStreamType,
+    },
+    ForeignStream {
+        stream_type: ForeignStreamType,
     },
 }
 
@@ -57,8 +60,12 @@ impl File {
         }
     }
 
-    pub fn stream(stream_type: StreamType) -> Self {
-        File::Stream { stream_type }
+    pub fn stream1(stream_type: OwnedStreamType) -> Self {
+        File::OwnedStream { stream_type }
+    }
+
+    pub fn stream2(stream_type: ForeignStreamType) -> Self {
+        File::ForeignStream { stream_type }
     }
 
     pub fn read(
@@ -71,7 +78,27 @@ impl File {
             File::Special { read, .. } => {
                 read(self, 0, &mut crate::io::Ignorer::ignoring(offset, writer))
             }
-            File::Stream { .. } => panic!("cannot read from a stream file"),
+            File::OwnedStream { .. } => panic!("cannot read from an owned stream file"),
+            File::ForeignStream { stream_type } => match stream_type {
+                ForeignStreamType::Process {
+                    pid,
+                    file_descriptor,
+                } => {
+                    let mut process = crate::process::PROCESSES.process_mut(*pid);
+                    let fd = process
+                        .file_descriptor_mut(*file_descriptor)
+                        .expect("file descriptor not found");
+                    match fd {
+                        crate::process::FileDescriptor::OwnedStream { buffer, .. } => {
+                            let bytes = buffer.drain(..).collect::<alloc::vec::Vec<_>>();
+                            let written = writer.write(bytes.as_slice())?;
+
+                            Ok(written)
+                        }
+                        e => panic!("expected owned stream file descriptor, found {e:?}"),
+                    }
+                }
+            },
         }
     }
 }
@@ -257,8 +284,15 @@ impl Directory {
                 File::Special { .. } => {
                     log::debug!("{:indent$}+ '{name}' (special)", "");
                 }
-                File::Stream { stream_type } => {
+                File::OwnedStream { stream_type } => {
                     log::debug!("{:indent$}+ '{name}' (stream {:?})", "", stream_type);
+                }
+                File::ForeignStream { stream_type } => {
+                    log::debug!(
+                        "{:indent$}+ '{name}' (foreign stream {:?})",
+                        "",
+                        stream_type
+                    );
                 }
             }
         }

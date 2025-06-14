@@ -8,7 +8,7 @@ use x86_64::structures::paging::{
 
 use crate::process::{MappedPage, PROCESSES};
 
-mod generated;
+pub mod generated;
 
 fn copy_string_from_user(string: generated::string_const_t) -> String {
     let mut bytes = vec![0; string.len as usize];
@@ -18,9 +18,11 @@ fn copy_string_from_user(string: generated::string_const_t) -> String {
     String::from_utf8(bytes).expect("Invalid UTF-8 string")
 }
 
-fn print(_pid: u32, arg: &mut generated::syscall_print_t) {
+fn print(pid: u32, arg: &mut generated::syscall_print_t) {
     let string = copy_string_from_user(arg.message);
     write!(crate::TERM.writer(), "{string}").expect("Failed to write to terminal");
+
+    log::debug!("[{pid}]: {string}");
 }
 
 /// sleep for the number of milliseconds in rbx
@@ -45,6 +47,20 @@ fn exit(pid: u32, arg: &mut generated::syscall_exit_t) {
 
         log::debug!("Process {} exited with code {}", p.pid(), arg.status);
     });
+
+    for process in PROCESSES.processes_mut().iter_mut() {
+        match process.state {
+            crate::process::State::WaitingForChild {
+                pid: child_pid,
+                arg: child_arg,
+            } if child_pid == pid => {
+                process.load_paging();
+                (unsafe { &mut *child_arg }).return_value.status = arg.status;
+                process.state = crate::process::State::Ready;
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Get the name of the entry at index rdx in the directory at path in rbx
@@ -139,14 +155,17 @@ fn read(pid: u32, arg: &mut generated::syscall_read_t) {
 
     let mut process = crate::process::PROCESSES.process_mut(pid);
     let Some(fd) = process.file_descriptor_mut(arg.fd) else {
-        log::debug!("Invalid file descriptor: {}", arg.fd);
+        log::debug!(
+            "pid {pid}, invalid file descriptor: {arg:x?} ({:#x})",
+            core::ptr::from_ref(arg) as u64
+        );
         arg.return_value.bytes_read = 0;
         arg.return_value.error = generated::SYSCALL_READ_ERROR_INVALID_FD;
         return;
     };
 
     match fd {
-        crate::process::Processi32::Regular { path, offset } => {
+        crate::process::FileDescriptor::Regular { path, offset } => {
             let offset = *offset;
             let path = path.clone();
             drop(process);
@@ -166,7 +185,7 @@ fn read(pid: u32, arg: &mut generated::syscall_read_t) {
             );
 
             PROCESSES.with_process_mut(pid, |p| {
-                let crate::process::Processi32::Regular { offset, .. } = p
+                let crate::process::FileDescriptor::Regular { offset, .. } = p
                     .file_descriptor_mut(arg.fd)
                     .expect("File descriptor not found")
                 else {
@@ -195,15 +214,21 @@ fn read(pid: u32, arg: &mut generated::syscall_read_t) {
                 }
             });
         }
-        crate::process::Processi32::Stream { buffer, .. } => {
+        crate::process::FileDescriptor::OwnedStream { buffer, .. } => {
             if buffer.is_empty() {
-                process.state = crate::process::State::WaitingForStream(arg.fd);
+                if (arg.options & generated::SYSCALL_READ_OPTION_NON_BLOCKING) != 0 {
+                    arg.return_value.bytes_read = 0;
+                    arg.return_value.error = generated::SYSCALL_READ_OPTION_NONE;
+                    process.state = crate::process::State::Ready;
+                } else {
+                    process.state = crate::process::State::WaitingForStream(arg.fd);
+                }
             } else {
                 let bytes = buffer.drain(0..(arg.len as usize).min(buffer.len()));
                 let len = bytes.len();
 
                 for (i, byte) in bytes.enumerate() {
-                    unsafe { arg.buf.cast::<u8>().add(i as usize).write_volatile(byte) };
+                    unsafe { arg.buf.cast::<u8>().add(i).write_volatile(byte) };
 
                     log::trace!("Read {i} bytes from stdin");
                 }
@@ -214,6 +239,53 @@ fn read(pid: u32, arg: &mut generated::syscall_read_t) {
                 process.state = crate::process::State::Ready;
             }
         }
+        crate::process::FileDescriptor::ForeignStream { stream_type } => match stream_type {
+            &mut crate::process::ForeignStreamType::Process {
+                pid: other_pid,
+                file_descriptor,
+            } => {
+                drop(process);
+                let mut other_process = PROCESSES.process_mut(other_pid);
+                let fd = other_process
+                    .file_descriptor_mut(file_descriptor)
+                    .expect("Foreign stream file descriptor not found");
+
+                match fd {
+                    crate::process::FileDescriptor::Regular { .. } => todo!(),
+                    crate::process::FileDescriptor::ForeignStream { .. } => todo!(),
+                    crate::process::FileDescriptor::OwnedStream { buffer, .. } => {
+                        if buffer.is_empty() {
+                            drop(other_process);
+                            if (arg.options & generated::SYSCALL_READ_OPTION_NON_BLOCKING) != 0 {
+                                arg.return_value.bytes_read = 0;
+                                arg.return_value.error = generated::SYSCALL_READ_OPTION_NONE;
+                                PROCESSES.process_mut(pid).state = crate::process::State::Ready;
+                            } else {
+                                PROCESSES.process_mut(pid).state =
+                                    crate::process::State::WaitingForStream(arg.fd);
+                            }
+                        } else {
+                            let bytes = buffer.drain(0..(arg.len as usize).min(buffer.len()));
+                            let len = bytes.len();
+
+                            for (i, byte) in bytes.enumerate() {
+                                unsafe {
+                                    arg.buf.cast::<u8>().add(i).write_volatile(byte);
+                                }
+                            }
+
+                            arg.return_value.bytes_read = len as u32;
+                            arg.return_value.error = generated::SYSCALL_READ_ERROR_NONE;
+
+                            drop(other_process);
+                            PROCESSES.process_mut(pid).state = crate::process::State::Ready;
+                        }
+                    }
+                    crate::process::FileDescriptor::Terminal => todo!(),
+                }
+            }
+        },
+        crate::process::FileDescriptor::Terminal => todo!(),
     }
 }
 
@@ -229,7 +301,7 @@ fn fork(pid: u32, arg: &mut generated::syscall_fork_t) {
     PROCESSES.add_process(new_process);
 
     // return the pid of the new process in rax
-    let mut process = PROCESSES.process_mut(pid);
+    let process = PROCESSES.process_mut(pid);
     process.load_paging();
     arg.return_value.child_pid = new_pid;
 }
@@ -249,12 +321,19 @@ fn open(pid: u32, arg: &mut generated::syscall_open_t) {
         let mut process = PROCESSES.process_mut(pid);
 
         let fd = match file {
-            &mut crate::vfs::File::Stream { stream_type } => crate::process::Processi32::Stream {
-                buffer: alloc::collections::VecDeque::with_capacity(1024),
-                max_size: 1024,
-                stream_type,
-            },
-            _ => crate::process::Processi32::Regular { path, offset: 0 },
+            &mut crate::vfs::File::OwnedStream { stream_type } => {
+                crate::process::FileDescriptor::OwnedStream {
+                    buffer: alloc::collections::VecDeque::with_capacity(1024),
+                    max_size: 1024,
+                    stream_type,
+                }
+            }
+            crate::vfs::File::Regular { .. } | crate::vfs::File::Special { .. } => {
+                crate::process::FileDescriptor::Regular { path, offset: 0 }
+            }
+            &mut crate::vfs::File::ForeignStream { stream_type } => {
+                crate::process::FileDescriptor::ForeignStream { stream_type }
+            }
         };
 
         let fd = process.new_file_descriptor(fd);
@@ -302,19 +381,18 @@ fn mmap(pid: u32, arg: &mut generated::syscall_mmap_t) {
         .map_or(START_ADDRESS, |&m| m.page.start_address().as_u64() + 0x1000);
     let page = Page::containing_address(x86_64::VirtAddr::new(address));
 
-    log::debug!(
+    log::trace!(
         "mmap process {}, address {address:#x}, page {page:?}",
         process.pid()
     );
 
     let mut kernel_paging = crate::kernel_paging();
     let phys_frame = kernel_paging
-        .frame_allocator
         .allocate_frame()
         .expect("Failed to allocate frame");
 
     let frame_virt_addr =
-        kernel_paging.page_table.phys_offset() + phys_frame.start_address().as_u64();
+        kernel_paging.page_table().phys_offset() + phys_frame.start_address().as_u64();
     (unsafe { *frame_virt_addr.as_mut_ptr::<[u8; 4096]>() }).fill(0);
 
     let flags = PageTableFlags::PRESENT
@@ -326,7 +404,7 @@ fn mmap(pid: u32, arg: &mut generated::syscall_mmap_t) {
         process
             .paging
             .page_table
-            .map_to(page, phys_frame, flags, &mut kernel_paging.frame_allocator)
+            .map_to(page, phys_frame, flags, &mut *kernel_paging)
             .expect("Failed to map page")
             .flush();
     }
@@ -358,7 +436,7 @@ fn munmap(pid: u32, arg: &mut generated::syscall_munmap_t) {
             flush.flush();
 
             let mut kernel_paging = crate::kernel_paging();
-            unsafe { kernel_paging.frame_allocator.deallocate_frame(frame) };
+            unsafe { kernel_paging.deallocate_frame(frame) };
 
             arg.return_value.error = generated::SYSCALL_MUNMAP_ERROR_NONE;
         }
@@ -396,7 +474,7 @@ fn execve(pid: u32, arg: &mut generated::syscall_execve_t) {
         .file(&path)
     {
         Some(crate::vfs::File::Regular { contents }) => {
-            PROCESSES.process_mut(pid).execve(contents);
+            PROCESSES.process_mut(pid).execve(contents, &argv);
         }
         Some(_) => {
             log::debug!("Cannot execute special file: {path}");
@@ -418,7 +496,6 @@ fn map_framebuffer(pid: u32, arg: &mut generated::syscall_map_framebuffer_t) {
     let size = crate::term::TERM.framebuffer.height * crate::term::TERM.framebuffer.width * 4;
 
     let start_phys_address = kernel_paging
-        .page_table
         .translate_addr(x86_64::VirtAddr::new(
             crate::term::TERM.framebuffer.ptr as u64,
         ))
@@ -454,7 +531,7 @@ fn map_framebuffer(pid: u32, arg: &mut generated::syscall_map_framebuffer_t) {
                     )),
                     frame,
                     flags,
-                    &mut kernel_paging.frame_allocator,
+                    &mut *kernel_paging,
                 )
                 .expect("Failed to map framebuffer page")
                 .flush();
@@ -470,14 +547,123 @@ fn map_framebuffer(pid: u32, arg: &mut generated::syscall_map_framebuffer_t) {
     };
 }
 
+fn write(pid: u32, arg: &mut generated::syscall_write_t) {
+    log::trace!(
+        "syscall_handler: write fd {}, buffer {:x}, length {}",
+        arg.fd,
+        arg.buf as u64,
+        arg.len
+    );
+
+    let mut process = PROCESSES.process_mut(pid);
+    let Some(mut fd) = process.file_descriptor_mut(arg.fd) else {
+        log::debug!("Invalid file descriptor: {}", arg.fd);
+        arg.return_value.bytes_written = 0;
+        arg.return_value.error = generated::SYSCALL_WRITE_ERROR_INVALID_FD;
+        return;
+    };
+
+    if let &mut crate::process::FileDescriptor::ForeignStream { stream_type } = fd {
+        drop(process);
+        let (other_pid, other_fd) =
+            resolve_foreign_stream(stream_type).expect("failed to resolve fd");
+        process = PROCESSES.process_mut(other_pid);
+        fd = process
+            .file_descriptor_mut(other_fd)
+            .expect("Foreign stream file descriptor not found");
+    }
+
+    match fd {
+        crate::process::FileDescriptor::Regular { path, offset } => {
+            todo!(
+                "write to regular file, pid {pid}, fd {}, path {path}, offset {offset}",
+                arg.fd
+            )
+        }
+        crate::process::FileDescriptor::OwnedStream {
+            buffer, max_size, ..
+        } => {
+            if buffer.len() >= *max_size {
+                arg.return_value.bytes_written = 0;
+                arg.return_value.error = generated::SYSCALL_WRITE_ERROR_NONE;
+                return;
+            }
+
+            let bytes_to_write = (arg.len as usize).min(*max_size - buffer.len());
+            for i in 0..bytes_to_write {
+                let byte = unsafe { arg.buf.cast::<u8>().add(i).read_volatile() };
+                buffer.push_back(byte);
+            }
+
+            arg.return_value.bytes_written = bytes_to_write as u32;
+            arg.return_value.error = generated::SYSCALL_WRITE_ERROR_NONE;
+        }
+        crate::process::FileDescriptor::ForeignStream { .. } => {
+            unreachable!("foreign streams should be resolved before writing")
+        }
+        crate::process::FileDescriptor::Terminal => {
+            let mut writer = crate::term::TERM.writer();
+
+            let mut vec = vec![0; arg.len as usize];
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    arg.buf.cast::<u8>(),
+                    vec.as_mut_ptr(),
+                    arg.len as usize,
+                );
+            }
+
+            let str = String::from_utf8(vec).unwrap_or_else(|e| {
+                panic!(
+                    "Invalid UTF-8 string in syscall_write: len {}: {}",
+                    arg.len,
+                    e.utf8_error()
+                )
+            });
+            writer.write_str(&str).expect("Failed to write to terminal");
+
+            arg.return_value.bytes_written = arg.len;
+            arg.return_value.error = generated::SYSCALL_WRITE_ERROR_NONE;
+        }
+    }
+}
+
+fn resolve_foreign_stream(stream: crate::process::ForeignStreamType) -> Option<(u32, i32)> {
+    log::debug!("resolving foreign stream: {stream:?}");
+    match stream {
+        crate::process::ForeignStreamType::Process {
+            pid,
+            file_descriptor,
+        } => {
+            let process = PROCESSES.process(pid);
+            match process.file_descriptor(file_descriptor) {
+                Some(crate::process::FileDescriptor::OwnedStream { .. }) => {
+                    Some((pid, file_descriptor))
+                }
+                Some(&crate::process::FileDescriptor::ForeignStream { stream_type }) => {
+                    drop(process);
+                    resolve_foreign_stream(stream_type)
+                }
+                _ => None,
+            }
+        }
+    }
+}
+
+fn waitpid(pid: u32, arg: &mut generated::syscall_waitpid_t) {
+    PROCESSES.process_mut(pid).state = crate::process::State::WaitingForChild {
+        pid: arg.pid,
+        arg: core::ptr::from_mut(arg),
+    };
+}
+
 /// Handle system calls
 /// return true if the process still exists, false if it was terminated
 pub fn handle_syscall(pid: u32) {
     let (rax, rbx) = crate::process::PROCESSES.with_process(pid, |p| {
-        log::trace!(
-            "syscall_handler: process {pid} called syscall {:#x}",
-            p.registers.rax
-        );
+        log::trace!("process {pid} called syscall {:#x}", p.registers.rax);
+
+        p.load_paging();
 
         (p.registers.rax, p.registers.rbx)
     });
@@ -495,6 +681,8 @@ pub fn handle_syscall(pid: u32) {
         9 => munmap(pid, unsafe { &mut *(rbx as *mut _) }),
         10 => execve(pid, unsafe { &mut *(rbx as *mut _) }),
         11 => map_framebuffer(pid, unsafe { &mut *(rbx as *mut _) }),
+        12 => write(pid, unsafe { &mut *(rbx as *mut _) }),
+        13 => waitpid(pid, unsafe { &mut *(rbx as *mut _) }),
         n => panic!("unknown syscall: {n:#x}"),
     }
 }

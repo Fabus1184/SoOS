@@ -190,19 +190,6 @@ pub type uint_fast32_t = ::core::ffi::c_ulong;
 pub type uint_fast64_t = ::core::ffi::c_ulong;
 pub type intmax_t = __intmax_t;
 pub type uintmax_t = __uintmax_t;
-pub const syscall_id_t_SYSCALL_PRINT: syscall_id_t = 0;
-pub const syscall_id_t_SYSCALL_SLEEP: syscall_id_t = 1;
-pub const syscall_id_t_SYSCALL_EXIT: syscall_id_t = 2;
-pub const syscall_id_t_SYSCALL_LISTDIR: syscall_id_t = 3;
-pub const syscall_id_t_SYSCALL_READ: syscall_id_t = 4;
-pub const syscall_id_t_SYSCALL_FORK: syscall_id_t = 5;
-pub const syscall_id_t_SYSCALL_OPEN: syscall_id_t = 6;
-pub const syscall_id_t_SYSCALL_CLOSE: syscall_id_t = 7;
-pub const syscall_id_t_SYSCALL_MMAP: syscall_id_t = 8;
-pub const syscall_id_t_SYSCALL_MUNMAP: syscall_id_t = 9;
-pub const syscall_id_t_SYSCALL_EXECVE: syscall_id_t = 10;
-pub const syscall_id_t_SYSCALL_MAP_FRAMEBUFFER: syscall_id_t = 11;
-pub type syscall_id_t = ::core::ffi::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct string_t {
@@ -229,6 +216,36 @@ const _: () = {
     ["Offset of field: string_const_t::ptr"][::core::mem::offset_of!(string_const_t, ptr) - 0usize];
     ["Offset of field: string_const_t::len"][::core::mem::offset_of!(string_const_t, len) - 8usize];
 };
+pub type fd_t = i32;
+pub const FD_STDIN: fd_t = 0;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct entry_t {
+    pub argc: u32,
+    pub argv: *mut string_const_t,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of entry_t"][::core::mem::size_of::<entry_t>() - 16usize];
+    ["Alignment of entry_t"][::core::mem::align_of::<entry_t>() - 8usize];
+    ["Offset of field: entry_t::argc"][::core::mem::offset_of!(entry_t, argc) - 0usize];
+    ["Offset of field: entry_t::argv"][::core::mem::offset_of!(entry_t, argv) - 8usize];
+};
+pub const syscall_id_t_SYSCALL_PRINT: syscall_id_t = 0;
+pub const syscall_id_t_SYSCALL_SLEEP: syscall_id_t = 1;
+pub const syscall_id_t_SYSCALL_EXIT: syscall_id_t = 2;
+pub const syscall_id_t_SYSCALL_LISTDIR: syscall_id_t = 3;
+pub const syscall_id_t_SYSCALL_READ: syscall_id_t = 4;
+pub const syscall_id_t_SYSCALL_FORK: syscall_id_t = 5;
+pub const syscall_id_t_SYSCALL_OPEN: syscall_id_t = 6;
+pub const syscall_id_t_SYSCALL_CLOSE: syscall_id_t = 7;
+pub const syscall_id_t_SYSCALL_MMAP: syscall_id_t = 8;
+pub const syscall_id_t_SYSCALL_MUNMAP: syscall_id_t = 9;
+pub const syscall_id_t_SYSCALL_EXECVE: syscall_id_t = 10;
+pub const syscall_id_t_SYSCALL_MAP_FRAMEBUFFER: syscall_id_t = 11;
+pub const syscall_id_t_SYSCALL_WRITE: syscall_id_t = 12;
+pub const syscall_id_t_SYSCALL_WAITPID: syscall_id_t = 13;
+pub type syscall_id_t = ::core::ffi::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct syscall_print_t {
@@ -326,11 +343,12 @@ const _: () = {
     ["Offset of field: syscall_listdir_t::return_value"]
         [::core::mem::offset_of!(syscall_listdir_t, return_value) - 28usize];
 };
-pub type fd_t = i32;
-pub const FD_STDIN: fd_t = 0;
 pub type syscall_read_error_t = u32;
 pub const SYSCALL_READ_ERROR_NONE: syscall_read_error_t = 0;
 pub const SYSCALL_READ_ERROR_INVALID_FD: syscall_read_error_t = 1;
+pub type sysycall_read_option_t = u32;
+pub const SYSCALL_READ_OPTION_NONE: sysycall_read_option_t = 0;
+pub const SYSCALL_READ_OPTION_NON_BLOCKING: sysycall_read_option_t = 1;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct syscall_read_return_t {
@@ -353,6 +371,7 @@ pub struct syscall_read_t {
     pub fd: fd_t,
     pub buf: *mut ::core::ffi::c_void,
     pub len: u32,
+    pub options: sysycall_read_option_t,
     pub return_value: syscall_read_return_t,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
@@ -363,8 +382,10 @@ const _: () = {
     ["Offset of field: syscall_read_t::buf"][::core::mem::offset_of!(syscall_read_t, buf) - 8usize];
     ["Offset of field: syscall_read_t::len"]
         [::core::mem::offset_of!(syscall_read_t, len) - 16usize];
+    ["Offset of field: syscall_read_t::options"]
+        [::core::mem::offset_of!(syscall_read_t, options) - 20usize];
     ["Offset of field: syscall_read_t::return_value"]
-        [::core::mem::offset_of!(syscall_read_t, return_value) - 20usize];
+        [::core::mem::offset_of!(syscall_read_t, return_value) - 24usize];
 };
 pub type pid_t = u32;
 #[repr(C)]
@@ -599,4 +620,78 @@ const _: () = {
         [::core::mem::align_of::<syscall_map_framebuffer_t>() - 8usize];
     ["Offset of field: syscall_map_framebuffer_t::return_value"]
         [::core::mem::offset_of!(syscall_map_framebuffer_t, return_value) - 0usize];
+};
+pub type syscall_write_error_t = u32;
+pub const SYSCALL_WRITE_ERROR_NONE: syscall_write_error_t = 0;
+pub const SYSCALL_WRITE_ERROR_INVALID_FD: syscall_write_error_t = 1;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct syscall_write_return_t {
+    pub bytes_written: u32,
+    pub error: syscall_write_error_t,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of syscall_write_return_t"][::core::mem::size_of::<syscall_write_return_t>() - 8usize];
+    ["Alignment of syscall_write_return_t"]
+        [::core::mem::align_of::<syscall_write_return_t>() - 4usize];
+    ["Offset of field: syscall_write_return_t::bytes_written"]
+        [::core::mem::offset_of!(syscall_write_return_t, bytes_written) - 0usize];
+    ["Offset of field: syscall_write_return_t::error"]
+        [::core::mem::offset_of!(syscall_write_return_t, error) - 4usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct syscall_write_t {
+    pub fd: fd_t,
+    pub buf: *const ::core::ffi::c_void,
+    pub len: u32,
+    pub return_value: syscall_write_return_t,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of syscall_write_t"][::core::mem::size_of::<syscall_write_t>() - 32usize];
+    ["Alignment of syscall_write_t"][::core::mem::align_of::<syscall_write_t>() - 8usize];
+    ["Offset of field: syscall_write_t::fd"][::core::mem::offset_of!(syscall_write_t, fd) - 0usize];
+    ["Offset of field: syscall_write_t::buf"]
+        [::core::mem::offset_of!(syscall_write_t, buf) - 8usize];
+    ["Offset of field: syscall_write_t::len"]
+        [::core::mem::offset_of!(syscall_write_t, len) - 16usize];
+    ["Offset of field: syscall_write_t::return_value"]
+        [::core::mem::offset_of!(syscall_write_t, return_value) - 20usize];
+};
+pub type syscall_waitpid_error_t = u32;
+pub const SYSCALL_WAITPID_ERROR_NONE: syscall_waitpid_error_t = 0;
+pub const SYSCALL_WAITPID_ERROR_INVALID_PID: syscall_waitpid_error_t = 1;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct syscall_waitpid_return_t {
+    pub status: u32,
+    pub error: syscall_waitpid_error_t,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of syscall_waitpid_return_t"]
+        [::core::mem::size_of::<syscall_waitpid_return_t>() - 8usize];
+    ["Alignment of syscall_waitpid_return_t"]
+        [::core::mem::align_of::<syscall_waitpid_return_t>() - 4usize];
+    ["Offset of field: syscall_waitpid_return_t::status"]
+        [::core::mem::offset_of!(syscall_waitpid_return_t, status) - 0usize];
+    ["Offset of field: syscall_waitpid_return_t::error"]
+        [::core::mem::offset_of!(syscall_waitpid_return_t, error) - 4usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct syscall_waitpid_t {
+    pub pid: pid_t,
+    pub return_value: syscall_waitpid_return_t,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of syscall_waitpid_t"][::core::mem::size_of::<syscall_waitpid_t>() - 12usize];
+    ["Alignment of syscall_waitpid_t"][::core::mem::align_of::<syscall_waitpid_t>() - 4usize];
+    ["Offset of field: syscall_waitpid_t::pid"]
+        [::core::mem::offset_of!(syscall_waitpid_t, pid) - 0usize];
+    ["Offset of field: syscall_waitpid_t::return_value"]
+        [::core::mem::offset_of!(syscall_waitpid_t, return_value) - 4usize];
 };

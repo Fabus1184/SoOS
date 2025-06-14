@@ -132,19 +132,8 @@ pub unsafe extern "C" fn syscall_handler(
 ) {
     log::trace!("syscall_handler: stack_frame {stack_frame:x?}, registers {registers:x?}");
 
-    let mut process = PROCESSES.current_mut();
-
-    process.flags = stack_frame.cpu_flags.bits();
-    process.rip = stack_frame.instruction_pointer.as_u64();
-    process.registers = crate::idt::GPRegisters {
-        rsp: stack_frame.stack_pointer.as_u64(),
-        ..registers
-    };
-    process.xsave.save();
-
-    let pid = process.pid();
-
-    drop(process);
+    let pid = crate::process::store_state(registers, &stack_frame)
+        .expect("syscall triggered but no current process");
 
     handle_syscall(pid);
 
@@ -165,9 +154,7 @@ extern "C" fn irq_handler(
 ) {
     trace!("irq_handler begin: irq {irq:0x?}, stack_frame {stack_frame:0x?}, registers {registers:0x?}");
 
-    {
-        crate::process::PROCESSES.current_mut().xsave.save();
-    }
+    let pid = crate::process::store_state(registers, &stack_frame);
 
     match irq {
         0 => unsafe {
@@ -226,14 +213,14 @@ extern "C" fn irq_handler(
                                     {
                                         let pid = process.pid();
                                         for (_, fd) in process.file_descriptors_mut() {
-                                            if let process::Processi32::Stream {
+                                            if let process::FileDescriptor::OwnedStream {
                                                 buffer,
                                                 max_size,
                                                 stream_type,
                                             } = fd
                                             {
                                                 if *stream_type
-                                                    == crate::process::StreamType::Keyboard
+                                                    == crate::process::OwnedStreamType::Keyboard
                                                 {
                                                     if buffer.len() < *max_size {
                                                         buffer.push_back(char as u8);
@@ -295,13 +282,13 @@ extern "C" fn irq_handler(
                     let pid = process.pid();
 
                     for (_, fd) in process.file_descriptors_mut() {
-                        if let process::Processi32::Stream {
+                        if let process::FileDescriptor::OwnedStream {
                             buffer,
                             max_size,
                             stream_type,
                         } = fd
                         {
-                            if *stream_type == crate::process::StreamType::Mouse {
+                            if *stream_type == crate::process::OwnedStreamType::Mouse {
                                 if buffer.len() < *max_size {
                                     let bytes = unsafe {
                                         core::mem::transmute::<
@@ -332,20 +319,23 @@ extern "C" fn irq_handler(
 
     trace!("irq_handler end");
 
-    crate::process::PROCESSES.current().xsave.load();
-
-    unsafe {
-        crate::do_iret(
-            u64::from(stack_frame.code_segment.0),
-            u64::from(stack_frame.stack_segment.0),
-            stack_frame.cpu_flags.bits(),
-            stack_frame.instruction_pointer.as_u64(),
-            &GPRegisters {
-                rsp: stack_frame.stack_pointer.as_u64(),
-                ..registers
-            },
-        )
-    };
+    match pid {
+        Some(pid) => crate::process::iret(pid),
+        None => {
+            unsafe {
+                crate::process::do_iret(
+                    u64::from(stack_frame.code_segment.0),
+                    u64::from(stack_frame.stack_segment.0),
+                    stack_frame.cpu_flags.bits(),
+                    stack_frame.instruction_pointer.as_u64(),
+                    &GPRegisters {
+                        rsp: stack_frame.stack_pointer.as_u64(),
+                        ..registers
+                    },
+                )
+            };
+        }
+    }
 }
 
 extern "x86-interrupt" fn alignment_check_handler(stack_frame: InterruptStackFrame, err: u64) {
@@ -388,7 +378,7 @@ extern "x86-interrupt" fn general_protection_fault_handler(
 ) {
     if (stack_frame.code_segment.rpl() == x86_64::PrivilegeLevel::Ring3) && (err & 0x1 == 0) {
         // User mode general protection fault
-        let mut process = PROCESSES.current_mut();
+        let mut process = PROCESSES.current_mut().expect("No current process");
 
         process.state = crate::process::State::Terminated(1);
 
@@ -440,7 +430,7 @@ extern "x86-interrupt" fn page_fault_handler(
     let address = x86_64::registers::control::Cr2::read().expect("Failed to read CR2 register");
 
     if err.contains(PageFaultErrorCode::USER_MODE) {
-        let mut process = PROCESSES.current_mut();
+        let mut process = PROCESSES.current_mut().expect("No current process");
 
         process.state = crate::process::State::Terminated(1);
 
@@ -475,11 +465,7 @@ extern "x86-interrupt" fn page_fault_handler(
         };
         let paging = crate::KERNEL_PAGING.get().unwrap();
 
-        match paging
-            .lock()
-            .page_table
-            .translate(VirtAddr::new(address.as_u64()))
-        {
+        match paging.lock().translate(VirtAddr::new(address.as_u64())) {
             x86_64::structures::paging::mapper::TranslateResult::Mapped {
                 frame, flags, ..
             } => {

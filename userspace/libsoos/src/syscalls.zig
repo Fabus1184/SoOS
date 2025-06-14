@@ -24,6 +24,8 @@ const SYSCALLS: []const Syscall = &[_]Syscall{
     Syscall{ .name = "munmap", .number = types.SYSCALL_MUNMAP, .arg_type = types.syscall_munmap_t, .return_type = types.syscall_munmap_return_t },
     Syscall{ .name = "execve", .number = types.SYSCALL_EXECVE, .arg_type = types.syscall_execve_t, .return_type = types.syscall_execve_return_t },
     Syscall{ .name = "map_framebuffer", .number = types.SYSCALL_MAP_FRAMEBUFFER, .arg_type = types.syscall_map_framebuffer_t, .return_type = types.syscall_map_framebuffer_return_t },
+    Syscall{ .name = "write", .number = types.SYSCALL_WRITE, .arg_type = types.syscall_write_t, .return_type = types.syscall_write_return_t },
+    Syscall{ .name = "waitpid", .number = types.SYSCALL_WAITPID, .arg_type = types.syscall_waitpid_t, .return_type = types.syscall_waitpid_return_t },
 };
 
 fn call(comptime syscall: Syscall, arg: *syscall.arg_type) syscall.return_type {
@@ -77,4 +79,10 @@ pub fn execve(arg: *types.syscall_execve_t) types.syscall_execve_return_t {
 }
 pub fn mapFramebuffer(arg: *types.syscall_map_framebuffer_t) types.syscall_map_framebuffer_return_t {
     return call(SYSCALLS[11], arg);
+}
+pub fn write(arg: *types.syscall_write_t) types.syscall_write_return_t {
+    return call(SYSCALLS[12], arg);
+}
+pub fn waitpid(arg: *types.syscall_waitpid_t) types.syscall_waitpid_return_t {
+    return call(SYSCALLS[13], arg);
 }

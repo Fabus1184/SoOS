@@ -3,8 +3,8 @@ use x86_64::{
     registers::control::{Cr3, Cr3Flags},
     structures::paging::{
         mapper::{CleanUp, MappedFrame, TranslateResult},
-        FrameAllocator, FrameDeallocator, Mapper as _, OffsetPageTable, Page, PageSize, PageTable,
-        PageTableFlags, PhysFrame, Size1GiB, Size2MiB, Size4KiB, Translate,
+        page, FrameAllocator, FrameDeallocator, Mapper as _, OffsetPageTable, Page, PageSize,
+        PageTable, PageTableFlags, PhysFrame, Size1GiB, Size2MiB, Size4KiB, Translate,
     },
     PhysAddr, VirtAddr,
 };
@@ -27,8 +27,38 @@ pub const KERNEL_FRAME_MAPPING_ADDRESS: u64 = 0xFFFF_8000_0000_0000;
 pub const UPPER_HALF_START: u64 = 0xFFFF_7FFF_FFFF_FFFF;
 
 pub struct KernelPaging {
-    pub page_table: OffsetPageTable<'static>,
-    pub frame_allocator: KernelFrameAllocator,
+    page_table: OffsetPageTable<'static>,
+    frame_allocator: KernelFrameAllocator,
+}
+
+impl KernelPaging {
+    pub fn frame_allocator(&self) -> &KernelFrameAllocator {
+        &self.frame_allocator
+    }
+
+    pub fn frame_allocator_mut(&mut self) -> &mut KernelFrameAllocator {
+        &mut self.frame_allocator
+    }
+
+    pub fn page_table(&self) -> &OffsetPageTable<'static> {
+        &self.page_table
+    }
+
+    pub fn page_table_mut(&mut self) -> &mut OffsetPageTable<'static> {
+        &mut self.page_table
+    }
+}
+
+pub struct UseKernelFrameAllocator;
+unsafe impl x86_64::structures::paging::FrameAllocator<Size4KiB> for UseKernelFrameAllocator {
+    fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
+        unreachable!("this is a dummy")
+    }
+}
+impl x86_64::structures::paging::FrameDeallocator<Size4KiB> for UseKernelFrameAllocator {
+    unsafe fn deallocate_frame(&mut self, _frame: PhysFrame<Size4KiB>) {
+        unreachable!("this is a dummy")
+    }
 }
 
 pub struct KernelFrameAllocator {
@@ -39,7 +69,7 @@ pub struct KernelFrameAllocator {
 }
 
 impl KernelFrameAllocator {
-    pub fn init(memmap: &SoosMemmap) -> Self {
+    fn init(memmap: &SoosMemmap) -> Self {
         static mut FRAME_MAP: [(Option<u64>, [bool; 1 << 20]); 8] = [(None, [false; 1 << 20]); 8];
         let frame_map = unsafe { &mut FRAME_MAP };
 
@@ -471,7 +501,7 @@ impl KernelPaging {
         let physical_address =
             PhysFrame::containing_address(match self.page_table.translate(VirtAddr::new(addr)) {
                 TranslateResult::Mapped { frame, offset, .. } => {
-                    assert!(offset == 0, "Offset must be zero for kernel page table");
+                    assert!(offset == 0, "page table not page-aligned, wtf?");
 
                     match frame {
                         MappedFrame::Size4KiB(phys_frame) => phys_frame.start_address(),
@@ -501,6 +531,7 @@ impl KernelPaging {
             + new_pagetable.start_address().as_u64())
             as *mut PageTable;
 
+        unsafe { self.page_table.clean_up(&mut self.frame_allocator) };
         self.page_table
             .level_4_table()
             .clone_into(unsafe { &mut *new_pagetable_ptr });
@@ -508,7 +539,163 @@ impl KernelPaging {
         let page_table =
             unsafe { OffsetPageTable::new(&mut *new_pagetable_ptr, self.page_table.phys_offset()) };
 
+        log::debug!(
+            "made userspace paging at {:#x} from kernel paging at {:#x}",
+            core::ptr::from_ref(page_table.level_4_table()) as u64,
+            core::ptr::from_ref(self.page_table.level_4_table()) as u64,
+        );
+
         UserspacePaging { page_table }
+    }
+}
+
+impl<S: PageSize> x86_64::structures::paging::Mapper<S> for KernelPaging
+where
+    x86_64::structures::paging::OffsetPageTable<'static>: x86_64::structures::paging::Mapper<S>,
+{
+    unsafe fn map_to_with_table_flags<A>(
+        &mut self,
+        page: Page<S>,
+        frame: PhysFrame<S>,
+        flags: PageTableFlags,
+        parent_table_flags: PageTableFlags,
+        _: &mut A,
+    ) -> Result<
+        x86_64::structures::paging::mapper::MapperFlush<S>,
+        x86_64::structures::paging::mapper::MapToError<S>,
+    >
+    where
+        Self: Sized,
+        A: FrameAllocator<Size4KiB> + ?Sized,
+    {
+        log::debug!(
+            "mapping page {:#x} to frame {:#x} with flags {:?}",
+            page.start_address().as_u64(),
+            frame.start_address().as_u64(),
+            flags
+        );
+
+        self.page_table.map_to_with_table_flags(
+            page,
+            frame,
+            flags,
+            parent_table_flags,
+            &mut self.frame_allocator,
+        )
+    }
+
+    fn unmap(
+        &mut self,
+        page: Page<S>,
+    ) -> Result<
+        (
+            PhysFrame<S>,
+            x86_64::structures::paging::mapper::MapperFlush<S>,
+        ),
+        x86_64::structures::paging::mapper::UnmapError,
+    > {
+        log::debug!(
+            "unmapping page {:#x} from kernel paging",
+            page.start_address().as_u64()
+        );
+
+        self.page_table.unmap(page)
+    }
+
+    unsafe fn update_flags(
+        &mut self,
+        page: Page<S>,
+        flags: PageTableFlags,
+    ) -> Result<
+        x86_64::structures::paging::mapper::MapperFlush<S>,
+        x86_64::structures::paging::mapper::FlagUpdateError,
+    > {
+        self.page_table.update_flags(page, flags)
+    }
+
+    unsafe fn set_flags_p4_entry(
+        &mut self,
+        page: Page<S>,
+        flags: PageTableFlags,
+    ) -> Result<
+        x86_64::structures::paging::mapper::MapperFlushAll,
+        x86_64::structures::paging::mapper::FlagUpdateError,
+    > {
+        self.page_table.set_flags_p4_entry(page, flags)
+    }
+
+    unsafe fn set_flags_p3_entry(
+        &mut self,
+        page: Page<S>,
+        flags: PageTableFlags,
+    ) -> Result<
+        x86_64::structures::paging::mapper::MapperFlushAll,
+        x86_64::structures::paging::mapper::FlagUpdateError,
+    > {
+        self.page_table.set_flags_p3_entry(page, flags)
+    }
+
+    unsafe fn set_flags_p2_entry(
+        &mut self,
+        page: Page<S>,
+        flags: PageTableFlags,
+    ) -> Result<
+        x86_64::structures::paging::mapper::MapperFlushAll,
+        x86_64::structures::paging::mapper::FlagUpdateError,
+    > {
+        self.page_table.set_flags_p2_entry(page, flags)
+    }
+
+    fn translate_page(
+        &self,
+        page: Page<S>,
+    ) -> Result<PhysFrame<S>, x86_64::structures::paging::mapper::TranslateError> {
+        self.page_table.translate_page(page)
+    }
+}
+
+impl x86_64::structures::paging::Translate for KernelPaging {
+    fn translate(&self, addr: VirtAddr) -> TranslateResult {
+        self.page_table.translate(addr)
+    }
+}
+
+unsafe impl x86_64::structures::paging::FrameAllocator<Size4KiB> for KernelPaging {
+    fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
+        self.frame_allocator.allocate_frame()
+    }
+}
+unsafe impl x86_64::structures::paging::FrameAllocator<Size4KiB> for &mut KernelPaging {
+    fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
+        self.frame_allocator.allocate_frame()
+    }
+}
+
+impl x86_64::structures::paging::FrameDeallocator<Size4KiB> for KernelPaging {
+    unsafe fn deallocate_frame(&mut self, frame: PhysFrame<Size4KiB>) {
+        self.frame_allocator.deallocate_frame(frame);
+    }
+}
+impl x86_64::structures::paging::FrameDeallocator<Size4KiB> for &mut KernelPaging {
+    unsafe fn deallocate_frame(&mut self, frame: PhysFrame<Size4KiB>) {
+        self.frame_allocator.deallocate_frame(frame);
+    }
+}
+
+impl x86_64::structures::paging::mapper::CleanUp for KernelPaging {
+    unsafe fn clean_up<D>(&mut self, _: &mut D)
+    where
+        D: FrameDeallocator<Size4KiB>,
+    {
+        self.page_table.clean_up(&mut self.frame_allocator);
+    }
+
+    unsafe fn clean_up_addr_range<D>(&mut self, range: page::PageRangeInclusive, _: &mut D)
+    where
+        D: FrameDeallocator<Size4KiB>,
+    {
+        self.page_table
+            .clean_up_addr_range(range, &mut self.frame_allocator);
     }
 }
 
@@ -581,6 +768,9 @@ impl UserspacePaging<'_> {
         let mut new_page_table =
             unsafe { OffsetPageTable::new(&mut *new_pagetable_ptr, self.page_table.phys_offset()) };
 
+        unsafe {
+            kernel_paging.clean_up(&mut UseKernelFrameAllocator);
+        }
         kernel_paging
             .page_table
             .level_4_table()

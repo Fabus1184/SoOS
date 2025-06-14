@@ -25,6 +25,7 @@ mod process;
 mod stuff;
 mod syscall;
 mod term;
+mod types;
 mod vfs;
 
 use core::arch::asm;
@@ -188,6 +189,14 @@ unsafe extern "C" fn main() -> ! {
         );
     }
 
+    i8253::TIMER0.init(
+        10,
+        i8253::Channel::CH0,
+        i8253::AccessMode::LoHiByte,
+        i8253::OperatingMode::RateGenerator,
+        i8253::BCDMode::Binary,
+    );
+
     idt::load_idt();
     pic::init();
     let mut data_port = x86_64::instructions::port::Port::<u8>::new(0x60);
@@ -278,41 +287,27 @@ unsafe extern "C" fn main() -> ! {
     }
 
     kernel::logger::KERNEL_LOGGER.init_ringbuffer();
-
-    i8253::TIMER0.init(
-        10,
-        i8253::Channel::CH0,
-        i8253::AccessMode::LoHiByte,
-        i8253::OperatingMode::RateGenerator,
-        i8253::BCDMode::Binary,
+    log::debug!(
+        "kernel memory {:#x} - {:#x}",
+        *KERNEL_MEMORY_START_ADDR,
+        *KERNEL_MEMORY_END_ADDR
     );
-
-    driver::pci::scan()
-        .expect("Failed to scan PCI devices!")
-        .into_iter()
-        .for_each(|dev| {
-            info!(
-                "Found PCI device: bus {} device {} function {} class {:?}",
-                dev.bus, dev.device, dev.function, dev.header.class
-            );
-        });
 
     {
         vfs::root::init_fs(&mut FILE_SYSTEM.lock());
     }
 
-    process::PROCESSES.add_process(process::Process::user_from_elf(
+    let mut process = process::Process::user_from_elf(
         ucs,
         uds,
         0x202,
-        include_bytes_aligned::include_bytes_aligned!(32, "../../build/userspace/bin/sogui"),
-    ));
+        include_bytes_aligned::include_bytes_aligned!(32, "../../build/userspace/bin/sosh"),
+    );
+    process.redirect_stdout_to_term();
+    process.redirect_keyboard_to_stdin();
+    process::PROCESSES.add_process(process);
 
     log::info!("kernel initialization complete, starting scheduler");
 
     process::schedule();
-}
-
-extern "C" {
-    pub fn do_iret(cs: u64, ds: u64, flags: u64, rip: u64, regs: *const idt::GPRegisters) -> !;
 }

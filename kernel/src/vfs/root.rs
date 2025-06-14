@@ -20,6 +20,14 @@ pub fn init_fs(fs: &mut Directory) {
     );
 
     fs.create_file(
+        "/bin/cat",
+        File::regular(include_bytes_aligned::include_bytes_aligned!(
+            32,
+            "../../../build/userspace/bin/cat"
+        )),
+    );
+
+    fs.create_file(
         "/var/log",
         File::special(|_, offset, writer| {
             let mut written = 0;
@@ -55,6 +63,22 @@ pub fn init_fs(fs: &mut Directory) {
                 .entry(alloc::format!("{pid}"))
                 .or_insert_with(|| {
                     let mut files = alloc::collections::BTreeMap::new();
+
+                    files.insert(
+                        String::from("stdin"),
+                        File::stream2(crate::process::ForeignStreamType::Process {
+                            pid,
+                            file_descriptor: 0,
+                        }),
+                    );
+
+                    files.insert(
+                        String::from("stdout"),
+                        File::stream2(crate::process::ForeignStreamType::Process {
+                            pid,
+                            file_descriptor: 1,
+                        }),
+                    );
 
                     files.insert(
                         String::from("memmap"),
@@ -157,7 +181,7 @@ pub fn init_fs(fs: &mut Directory) {
                 alloc::format!("{:<#16} {:<#16} {}\n", "Base Address", "Length", "Type").as_bytes(),
             )?;
 
-            for entry in kernel_paging.frame_allocator.memmap.iter() {
+            for entry in kernel_paging.frame_allocator().memmap.iter() {
                 let line = alloc::format!(
                     "{:<#16x} {:<#16x} {:?}\n",
                     entry.base,
@@ -167,7 +191,7 @@ pub fn init_fs(fs: &mut Directory) {
                 written += writer.write(line.as_bytes())?;
             }
 
-            let (allocated, used, total) = kernel_paging.frame_allocator.stats();
+            let (allocated, used, total) = kernel_paging.frame_allocator().stats();
             written += writer.write(
                 alloc::format!("\nused frames: {used}/{total} ({allocated} allocated)\n")
                     .as_bytes(),
@@ -179,6 +203,11 @@ pub fn init_fs(fs: &mut Directory) {
 
     fs.create_file(
         "/dev/mouse",
-        File::stream(crate::process::StreamType::Mouse),
+        File::stream1(crate::process::OwnedStreamType::Mouse),
+    );
+
+    fs.create_file(
+        "/dev/keyboard",
+        File::stream1(crate::process::OwnedStreamType::Keyboard),
     );
 }

@@ -19,7 +19,7 @@ const banner =
 
 const Command = struct {
     name: []const u8,
-    run: *const fn (argc: u32, argv: []const []const u8) void,
+    run: *const fn (argc: u32, argv: []const []const u8) anyerror!void,
 };
 
 const ANSI_RESET = "\x1b[0m";
@@ -33,41 +33,51 @@ const ANSI_FG_WHITE = "\x1b[37m";
 
 const prompt = ANSI_FG_GREEN ++ "sosh> " ++ ANSI_RESET;
 
+fn print(comptime message: []const u8, args: anytype) void {
+    var buffer: [4096]u8 = undefined;
+    const str = std.fmt.bufPrint(&buffer, message, args) catch @panic("Failed to format message");
+    const len = soos.write(1, str) catch @panic("Failed to write message");
+    if (len != str.len) {
+        std.log.err("Failed to write all bytes: expected {d}, got {d}\n", .{ str.len, len });
+        @panic("Failed to write all bytes");
+    }
+}
+
 const commands: []const Command = &[_]Command{
     .{ .name = "help", .run = struct {
-        fn help(_: u32, _: []const []const u8) void {
-            soos.print("available commands:\n", .{});
+        fn help(_: u32, _: []const []const u8) !void {
+            print("available commands:\n", .{});
             for (commands) |cmd| {
-                soos.print("* {s}{s}{s}\n", .{ ANSI_FG_MAGENTA, cmd.name, ANSI_RESET });
+                print("* {s}{s}{s}\n", .{ ANSI_FG_MAGENTA, cmd.name, ANSI_RESET });
             }
         }
     }.help },
     .{ .name = "clear", .run = struct {
-        fn clear(_: u32, _: []const []const u8) void {
+        fn clear(_: u32, _: []const []const u8) !void {
             reset();
         }
     }.clear },
     .{ .name = "exit", .run = struct {
-        fn exit(_: u32, _: []const []const u8) void {
+        fn exit(_: u32, _: []const []const u8) !void {
             soos.exit(0);
         }
     }.exit },
     .{
         .name = "ls",
         .run = struct {
-            fn ls(argc: u32, argv: []const []const u8) void {
+            fn ls(argc: u32, argv: []const []const u8) !void {
                 if (argc != 2) {
-                    soos.print("usage: ls <directory>\n", .{});
+                    print("usage: ls <directory>\n", .{});
                     return;
                 }
                 var listDir = soos.listdir(argv[1]) catch |err| {
-                    soos.print("Error: Failed to list directory '{s}': {}\n", .{ argv[1], err });
+                    print("Error: Failed to list directory '{s}': {}\n", .{ argv[1], err });
                     return;
                 };
                 while (listDir.next()) |entry| {
                     switch (entry.type) {
-                        .file => soos.print("{s}{s}\n", .{ ANSI_FG_BLUE, entry.name }),
-                        .directory => soos.print("{s}{s}/\n", .{ ANSI_FG_CYAN, entry.name }),
+                        .file => print("{s}{s}\n", .{ ANSI_FG_BLUE, entry.name }),
+                        .directory => print("{s}{s}/\n", .{ ANSI_FG_CYAN, entry.name }),
                     }
                 }
             }
@@ -76,56 +86,27 @@ const commands: []const Command = &[_]Command{
     .{
         .name = "fork",
         .run = struct {
-            fn fork(_: u32, _: []const []const u8) void {
+            fn fork(_: u32, _: []const []const u8) !void {
                 const pid = soos.fork();
                 if (pid == 0) {
-                    soos.print("Hello from the child process!\n", .{});
+                    print("Hello from the child process!\n", .{});
                     soos.exit(0);
                 } else {
-                    soos.print("Forked child process with PID: {d}\n", .{pid});
+                    print("Forked child process with PID: {d}\n", .{pid});
                 }
             }
         }.fork,
     },
     .{
-        .name = "cat",
-        .run = struct {
-            fn cat(argc: u32, argv: []const []const u8) void {
-                if (argc != 2) {
-                    soos.print("usage: cat <file>\n", .{});
-                    return;
-                }
-                const fd = soos.open(argv[1]) catch |err| {
-                    soos.print("Error: Failed to open file '{s}': {}\n", .{ argv[1], err });
-                    return;
-                };
-                var buffer: [4096]u8 = undefined;
-                var bytes_read: usize = 0;
-                while (true) {
-                    bytes_read = soos.read(fd, &buffer) catch |err| {
-                        std.log.err("Error: Failed to read file '{s}': {}\n", .{ argv[1], err });
-                        @panic("Failed to read file");
-                    };
-                    if (bytes_read == 0) break; // EOF
-                    soos.print("{s}", .{buffer[0..bytes_read]});
-                }
-                soos.close(fd) catch |err| {
-                    soos.print("Error: Failed to close file '{s}': {}\n", .{ argv[1], err });
-                    @panic("Failed to close file");
-                };
-            }
-        }.cat,
-    },
-    .{
         .name = "test",
         .run = struct {
-            fn test_(_: u32, _: []const []const u8) void {
+            fn test_(_: u32, _: []const []const u8) !void {
                 const pageAllocator = soos.pageAllocator();
                 var heap = std.heap.ArenaAllocator.init(pageAllocator);
                 defer heap.deinit();
                 var allocator = heap.allocator();
                 for (0..100) |i| {
-                    soos.print("test iteration {d}, allocating {d} bytes\n", .{ i, 100 + i * 100 });
+                    print("test iteration {d}, allocating {d} bytes\n", .{ i, 100 + i * 100 });
                     const testPtr = allocator.alloc(u32, 100 + i * 100) catch @panic("Failed to allocate memory");
                     defer allocator.free(testPtr);
                     // fill the allocated memory with some values
@@ -135,37 +116,21 @@ const commands: []const Command = &[_]Command{
                     // check if the values are set correctly
                     for (0..100 + i * 100) |j| {
                         if (testPtr[j] != j) {
-                            soos.print("{s}Value mismatch at index {d}, expected {d}, got {d}\n", .{ ANSI_FG_RED, j, j, testPtr[j] });
+                            print("{s}Value mismatch at index {d}, expected {d}, got {d}\n", .{ ANSI_FG_RED, j, j, testPtr[j] });
                             soos.exit(1);
                         }
                     }
-                    soos.print("{s}test iteration {d} passed\n", .{ ANSI_FG_GREEN, i });
+                    print("{s}test iteration {d} passed\n", .{ ANSI_FG_GREEN, i });
                 }
             }
         }.test_,
     },
     .{
-        .name = "exec",
-        .run = struct {
-            fn exec(argc: u32, argv: []const []const u8) void {
-                if (argc < 2) {
-                    soos.print("usage: exec <program> [args...]\n", .{});
-                    return;
-                }
-                const program = argv[1];
-                const args = argv[1..argc];
-                soos.execve(program, args) catch |err| {
-                    soos.print("Error: Failed to execute '{s}': {}\n", .{ program, err });
-                };
-            }
-        }.exec,
-    },
-    .{
         .name = "gui",
         .run = struct {
-            fn exec(argc: u32, _: []const []const u8) void {
+            fn exec(argc: u32, _: []const []const u8) !void {
                 if (argc != 1) {
-                    soos.print("usage: gui\n", .{});
+                    print("usage: gui\n", .{});
                     return;
                 }
                 const framebuffer = soos.mapFramebuffer();
@@ -199,10 +164,10 @@ const commands: []const Command = &[_]Command{
                     0b1100001001000000,
                     0b0000000110000000,
                 };
-                const fd = soos.open("/dev/mouse") catch unreachable;
+                const fd = try soos.open("/dev/mouse");
                 while (true) {
                     var mouseBuffer: [16]soos.events.mouse_event_t = undefined;
-                    const bytesRead = soos.read(fd, @ptrCast(&mouseBuffer)) catch unreachable;
+                    const bytesRead = try soos.read(fd, @ptrCast(&mouseBuffer), true);
                     // clear previous mouse cursor
                     for (0..19) |dy| {
                         for (0..16) |dx| {
@@ -235,7 +200,7 @@ const commands: []const Command = &[_]Command{
 };
 
 fn reset() void {
-    soos.print("\x1b[2J\x1b[H{s}\n\n", .{banner});
+    print("\x1b[2J\x1b[H{s}\n\n", .{banner});
 }
 
 pub const std_options = std.Options{
@@ -255,9 +220,9 @@ pub const std_options = std.Options{
                 .err => ANSI_FG_RED,
             };
 
-            soos.print("{s}[{s}] ", .{ colors, @tagName(message_level) });
-            soos.print(format, args);
-            soos.print("{s}\n", .{ANSI_RESET});
+            print("{s}[{s}] ", .{ colors, @tagName(message_level) });
+            print(format, args);
+            print("{s}\n", .{ANSI_RESET});
         }
     }.f,
 };
@@ -268,39 +233,51 @@ const DummyMutex = struct {
 };
 
 pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
-    std.log.err("{s}panic: {s}\n", .{ ANSI_FG_RED, message });
+    std.log.err("{s}sosh panic: {s}\n", .{ ANSI_FG_RED, message });
     soos.exit(1);
 }
 
-export fn _start() void {
+export fn _start() callconv(.naked) void {
+    asm volatile (
+        \\
+        \\ call _main
+    );
+}
+
+export fn _main() noreturn {
+    main() catch |err| {
+        std.log.err("error: {}\n", .{err});
+        soos.exit(1);
+    };
+    soos.exit(0);
+}
+
+fn main() !void {
     var commandBuffer: [1024]u8 = undefined;
     var commandLength: u64 = 0;
 
     reset();
-    soos.print("{s}_", .{prompt});
+    print("{s}_", .{prompt});
 
     while (true) {
         var inputBuffer: [64]u8 = undefined;
-        const inputLength = soos.read(0, &inputBuffer) catch |err| {
-            soos.print("Error: Failed to read input: {}\n", .{err});
-            soos.exit(1);
-        };
+        const inputLength = try soos.read(0, &inputBuffer, true);
         if (inputLength == 0) {
-            soos.exit(0);
+            @panic("EOF reached, exiting shell");
         }
 
-        soos.print("\x08 \x08", .{});
+        print("\x08 \x08", .{});
 
         for (0..inputLength) |i| {
             switch (inputBuffer[i]) {
                 '\x08' => {
                     if (commandLength > 0) {
                         commandLength -= 1;
-                        soos.print("\x08 \x08", .{});
+                        print("\x08 \x08", .{});
                     }
                 },
                 '\n' => {
-                    soos.print("\n", .{});
+                    print("\n", .{});
 
                     var argc: u32 = 0;
                     var argv: [32][]const u8 = undefined;
@@ -312,14 +289,34 @@ export fn _start() void {
 
                     for (commands) |cmd| {
                         if (std.mem.eql(u8, cmd.name, argv[0])) {
-                            cmd.run(argc, argv[0..argc]);
+                            cmd.run(argc, argv[0..argc]) catch |err| {
+                                print("error: command '{s}' failed: {}\n", .{ cmd.name, err });
+                            };
                             break;
                         }
                     } else {
-                        soos.print("unknown command: '{s}'", .{argv[0]});
+                        var binList = try soos.listdir("/bin");
+                        while (binList.next()) |entry| {
+                            if (entry.type != .file) continue;
+                            if (std.mem.eql(u8, entry.name, argv[0])) {
+                                const pid = soos.fork();
+                                if (pid == 0) {
+                                    var filename: [256]u8 = undefined;
+                                    const str = try std.fmt.bufPrint(&filename, "/bin/{s}", .{entry.name});
+                                    soos.execve(str, argv[0..argc]) catch |err| {
+                                        print("error: failed to execute '{s}': {}\n", .{ entry.name, err });
+                                    };
+                                } else {
+                                    _ = try soos.waitpid(pid);
+                                }
+                                break;
+                            }
+                        } else {
+                            print("unknown command: '{s}'", .{argv[0]});
+                        }
                     }
 
-                    soos.print("\n{s}", .{prompt});
+                    print("\n{s}", .{prompt});
 
                     commandLength = 0;
                     break;
@@ -328,11 +325,11 @@ export fn _start() void {
                     commandBuffer[commandLength] = inputBuffer[i];
                     commandLength += 1;
 
-                    soos.print("{s}", .{inputBuffer[i .. i + 1]});
+                    print("{s}", .{inputBuffer[i .. i + 1]});
                 },
             }
         }
 
-        soos.print("_", .{});
+        print("_", .{});
     }
 }

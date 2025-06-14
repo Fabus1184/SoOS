@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     var disabled = std.Target.Cpu.Feature.Set.empty;
     disabled.addFeature(@intFromEnum(std.Target.x86.Feature.mmx));
     disabled.addFeature(@intFromEnum(std.Target.x86.Feature.sse));
@@ -25,15 +25,21 @@ pub fn build(b: *std.Build) void {
 
     const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSmall });
 
-    const exe = b.addExecutable(.{
-        .name = "sosh",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
     const libsoos = b.dependency("libsoos", .{ .target = target });
-    exe.root_module.addImport("soos", libsoos.module("libsoos"));
 
-    b.installArtifact(exe);
+    const src = try std.fs.cwd().openDir("src", .{ .iterate = true });
+    var it = src.iterate();
+    while (try it.next()) |entry| {
+        std.debug.assert(entry.kind == .file);
+
+        const exe = b.addExecutable(.{
+            .name = std.mem.trimRight(u8, entry.name, ".zig"),
+            .root_source_file = try b.path("src").join(b.allocator, entry.name),
+            .target = target,
+            .optimize = optimize,
+        });
+        exe.root_module.addImport("soos", libsoos.module("libsoos"));
+
+        b.installArtifact(exe);
+    }
 }

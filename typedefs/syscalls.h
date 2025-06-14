@@ -1,5 +1,7 @@
 #include <stdint.h>
 
+#include "types.h"
+
 enum syscall_id_t {
     SYSCALL_PRINT = 0,
     SYSCALL_SLEEP = 1,
@@ -13,16 +15,8 @@ enum syscall_id_t {
     SYSCALL_MUNMAP = 9,
     SYSCALL_EXECVE = 10,
     SYSCALL_MAP_FRAMEBUFFER = 11,
-};
-
-struct string_t {
-    char *ptr;
-    uint32_t len;
-};
-
-struct string_const_t {
-    const char *ptr;
-    uint32_t len;
+    SYSCALL_WRITE = 12,
+    SYSCALL_WAITPID = 13,
 };
 
 struct syscall_print_t {
@@ -61,12 +55,12 @@ struct syscall_listdir_t {
     struct syscall_listdir_return_t return_value;
 };
 
-typedef int32_t fd_t;
-static const fd_t FD_STDIN = 0;
-
 typedef uint32_t syscall_read_error_t;
 static const syscall_read_error_t SYSCALL_READ_ERROR_NONE = 0;
 static const syscall_read_error_t SYSCALL_READ_ERROR_INVALID_FD = 1;
+typedef uint32_t sysycall_read_option_t;
+static const sysycall_read_option_t SYSCALL_READ_OPTION_NONE = 0;
+static const sysycall_read_option_t SYSCALL_READ_OPTION_NON_BLOCKING = 1;
 struct syscall_read_return_t {
     uint32_t bytes_read;
     syscall_read_error_t error;
@@ -75,6 +69,7 @@ struct syscall_read_t {
     fd_t fd;
     void *buf;
     uint32_t len;
+    sysycall_read_option_t options;
     struct syscall_read_return_t return_value;
 };
 
@@ -155,4 +150,30 @@ struct syscall_map_framebuffer_return_t {
 };
 struct syscall_map_framebuffer_t {
     struct syscall_map_framebuffer_return_t return_value;
+};
+
+typedef uint32_t syscall_write_error_t;
+static const syscall_write_error_t SYSCALL_WRITE_ERROR_NONE = 0;
+static const syscall_write_error_t SYSCALL_WRITE_ERROR_INVALID_FD = 1;
+struct syscall_write_return_t {
+    uint32_t bytes_written;
+    syscall_write_error_t error;
+};
+struct syscall_write_t {
+    fd_t fd;
+    const void *buf;
+    uint32_t len;
+    struct syscall_write_return_t return_value;
+};
+
+typedef uint32_t syscall_waitpid_error_t;
+static const syscall_waitpid_error_t SYSCALL_WAITPID_ERROR_NONE = 0;
+static const syscall_waitpid_error_t SYSCALL_WAITPID_ERROR_INVALID_PID = 1;
+struct syscall_waitpid_return_t {
+    uint32_t status;
+    syscall_waitpid_error_t error;
+};
+struct syscall_waitpid_t {
+    pid_t pid;
+    struct syscall_waitpid_return_t return_value;
 };
