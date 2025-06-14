@@ -14,7 +14,7 @@ const banner =
     \\|  $$$$$$/|  $$$$$$/|  $$$$$$/| $$  | $$
     \\ \______/  \______/  \______/ |__/  |__/
     \\
-    \\          - the SoOS shell -
+    \\          - █ the SoOS shell █ -
     ++ ANSI_RESET;
 
 const Command = struct {

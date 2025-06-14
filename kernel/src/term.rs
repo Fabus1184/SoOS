@@ -140,49 +140,67 @@ impl Performer {
             self.y = self.y.saturating_sub(diff);
         }
 
-        if c == '\0' {
-            return;
-        } else if c == ' ' {
-            let x_off = (self.x * FONT.tile_size.0 as usize) as u64 / font_scale;
-            let y_off = (self.y * FONT.tile_size.1 as usize) as u64 / font_scale;
-            for x in 0..FONT.tile_size.0 {
-                for y in 0..FONT.tile_size.1 {
-                    self.blit(
-                        x_off + u64::from(x) / font_scale,
-                        y_off + u64::from(y) / font_scale,
-                        self.bg,
-                    );
+        match c {
+            '\0' => return,
+            ' ' => {
+                let x_off = (self.x * FONT.tile_size.0 as usize) as u64 / font_scale;
+                let y_off = (self.y * FONT.tile_size.1 as usize) as u64 / font_scale;
+                for x in 0..FONT.tile_size.0 {
+                    for y in 0..FONT.tile_size.1 {
+                        self.blit(
+                            x_off + u64::from(x) / font_scale,
+                            y_off + u64::from(y) / font_scale,
+                            self.bg,
+                        );
+                    }
                 }
             }
-        } else if c.is_ascii_graphic() {
-            let x_off = (self.x * FONT.tile_size.0 as usize) as u64 / font_scale;
-            let y_off = (self.y * FONT.tile_size.1 as usize) as u64 / font_scale;
+            '█' => {
+                let x_off = (self.x * FONT.tile_size.0 as usize) as u64 / font_scale;
+                let y_off = (self.y * FONT.tile_size.1 as usize) as u64 / font_scale;
 
-            for x in 0..FONT.tile_size.0 {
-                for y in 0..FONT.tile_size.1 {
-                    let value = FONT.get_pixel(c, x, y);
-                    // lerp between fg and bg based on alpha
-                    let color = match value {
-                        Some(alpha) => {
-                            let alpha = u32::from(alpha);
-                            let fg = self.fg & 0x00FF_FFFF; // Mask to RGB
-                            let bg = self.bg & 0x00FF_FFFF; // Mask to RGB
-                            let r = ((fg >> 16) * alpha + (bg >> 16) * (255 - alpha)) / 255;
-                            let g =
-                                ((fg >> 8 & 0xFF) * alpha + (bg >> 8 & 0xFF) * (255 - alpha)) / 255;
-                            let b = ((fg & 0xFF) * alpha + (bg & 0xFF) * (255 - alpha)) / 255;
-                            (r << 16) | (g << 8) | b | 0xFF00_0000 // Add full opacity
-                        }
-                        None => self.bg,
-                    };
-
-                    self.blit(
-                        x_off + u64::from(x) / font_scale,
-                        y_off + u64::from(y) / font_scale,
-                        color,
-                    );
+                for x in 0..FONT.tile_size.0 {
+                    for y in 0..FONT.tile_size.1 {
+                        self.blit(
+                            x_off + u64::from(x) / font_scale,
+                            y_off + u64::from(y) / font_scale,
+                            self.fg,
+                        );
+                    }
                 }
             }
+            c if c.is_ascii_graphic() => {
+                let x_off = (self.x * FONT.tile_size.0 as usize) as u64 / font_scale;
+                let y_off = (self.y * FONT.tile_size.1 as usize) as u64 / font_scale;
+
+                for x in 0..FONT.tile_size.0 {
+                    for y in 0..FONT.tile_size.1 {
+                        let value = FONT.get_pixel(c, x, y);
+                        // lerp between fg and bg based on alpha
+                        let color = match value {
+                            Some(alpha) => {
+                                let alpha = u32::from(alpha);
+                                let fg = self.fg & 0x00FF_FFFF; // Mask to RGB
+                                let bg = self.bg & 0x00FF_FFFF; // Mask to RGB
+                                let r = ((fg >> 16) * alpha + (bg >> 16) * (255 - alpha)) / 255;
+                                let g = ((fg >> 8 & 0xFF) * alpha
+                                    + (bg >> 8 & 0xFF) * (255 - alpha))
+                                    / 255;
+                                let b = ((fg & 0xFF) * alpha + (bg & 0xFF) * (255 - alpha)) / 255;
+                                (r << 16) | (g << 8) | b | 0xFF00_0000 // Add full opacity
+                            }
+                            None => self.bg,
+                        };
+
+                        self.blit(
+                            x_off + u64::from(x) / font_scale,
+                            y_off + u64::from(y) / font_scale,
+                            color,
+                        );
+                    }
+                }
+            }
+            _ => panic!("unsupported character: {}", c),
         }
 
         self.x += 1;
