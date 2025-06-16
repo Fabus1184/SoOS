@@ -21,7 +21,7 @@ impl Font {
             unsafe { &mut BUFFER }
         };
 
-        let bytes = include_bytes!("../../font.png");
+        let bytes = include_bytes!("../../../font.png");
 
         let mut png = minipng::decode_png(bytes, buffer).expect("Failed to decode font PNG");
         let columns = 20;
@@ -52,22 +52,21 @@ impl Font {
         Self { chars }
     }
 
-    pub fn blit_char(&self, c: char, ptr: *mut Color, row_pitch: usize, color: Color) {
+    pub fn blit_char(&self, c: char, ptr: *mut Color, row_pitch: usize, fg: Color, bg: Color) {
         let bitmap = self
             .chars
             .get(c as usize - ' ' as usize)
             .expect("Character not found in font");
 
-        for row in 0..Self::CHAR_WIDTH {
-            for col in 0..Self::CHAR_HEIGHT {
+        for row in 0..Self::CHAR_HEIGHT {
+            for col in 0..Self::CHAR_WIDTH {
                 let ptr = unsafe { ptr.add(row_pitch * row + col) };
 
                 let alpha = bitmap[row][col];
-                if alpha > 0 {
-                    let background = unsafe { ptr.read_volatile() };
 
+                if alpha > 0 {
                     unsafe {
-                        ptr.write_volatile(color.blend(background, alpha));
+                        ptr.write_volatile(fg.blend(bg, alpha));
                     }
                 }
             }

@@ -17,7 +17,6 @@ extern crate alloc;
 mod driver;
 mod elf;
 mod events;
-mod font;
 mod idt;
 mod io;
 mod kernel;

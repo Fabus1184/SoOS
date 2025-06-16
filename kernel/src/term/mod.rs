@@ -2,6 +2,7 @@ use core::cell::Cell;
 
 use limine::request::FramebufferRequest;
 
+mod font;
 mod vte;
 
 pub static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
@@ -12,7 +13,10 @@ pub static TERM: spin::Lazy<Term> = spin::Lazy::new(|| {
         .expect("Failed to get framebuffer!");
     let fb = fbr.framebuffers().next().expect("No framebuffers!");
 
-    Term::new(&fb)
+    let term = Term::new(&fb);
+    term.clear();
+
+    term
 });
 
 pub struct Term {
@@ -21,7 +25,7 @@ pub struct Term {
     pub height_pixels: usize,
     x: Cell<usize>,
     y: Cell<usize>,
-    font: &'static crate::font::Font,
+    font: &'static font::Font,
     fg: Cell<Color>,
     bg: Cell<Color>,
 }
@@ -42,7 +46,7 @@ impl Term {
             height_pixels: framebuffer.height() as usize,
             x: Cell::new(0),
             y: Cell::new(0),
-            font: &crate::font::FONT_1,
+            font: &font::FONT_1,
             fg: Cell::new(Color::WHITE),
             bg: Cell::new(Color::BLACK),
         }
@@ -110,13 +114,14 @@ impl Term {
 
         // if no rows remain, scroll the screen
         if self.y.get() >= self.rows() {
-            self.scroll();
-            self.y.update(|y| y - 1);
+            for _ in 0..=(self.y.get() - self.rows()) {
+                self.scroll();
+                self.y.update(|y| y - 1);
+            }
         }
 
         let position = self.current_pixel_position();
         match c {
-            '\0' => return,
             ' ' => {
                 for x in 0..self.font.width_pixels() {
                     for y in 0..self.font.height_pixels() {
@@ -138,7 +143,7 @@ impl Term {
                 };
 
                 self.font
-                    .blit_char(c, ptr, self.width_pixels, self.fg.get());
+                    .blit_char(c, ptr, self.width_pixels, self.fg.get(), self.bg.get());
             }
             c => panic!("unsupported character: {:x}", u32::from(c)),
         }
@@ -157,8 +162,13 @@ impl Term {
             }
         }
 
-        // Clear the last line
-        unsafe { core::ptr::write(self.pixel_ptr(0, self.rows() - 1), Color::BLACK) };
+        // clear the last line
+        let ptr = self.pixel_ptr(self.rows(), self.rows() - 1).cast::<Color>();
+        for i in 0..(self.width_pixels * self.font.height_pixels()) {
+            unsafe {
+                ptr.add(i).write_volatile(self.bg.get());
+            }
+        }
     }
 }
 

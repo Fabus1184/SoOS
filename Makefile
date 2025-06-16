@@ -2,7 +2,7 @@ LIMINE=build/limine-9.3.3
 LIMINE_BIN=build/limine-9.3.3/bin/limine
 LIMINE_FILES = $(patsubst %, $(LIMINE)/bin/%, limine-bios.sys limine-bios-cd.bin limine-uefi-cd.bin)
 
-RELEASE=
+RELEASE=1
 
 KERNEL=build/kernel/x86_64-unknown-none/$(if $(RELEASE),release,debug)/soos
 KERNEL_SOURCES := $(shell find kernel -type f)
