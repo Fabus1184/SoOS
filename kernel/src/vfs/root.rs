@@ -18,12 +18,18 @@ pub fn init_fs(fs: &mut Directory) {
             "../../../build/userspace/bin/sosh"
         )),
     );
-
     fs.create_file(
         "/bin/cat",
         File::regular(include_bytes_aligned::include_bytes_aligned!(
             32,
             "../../../build/userspace/bin/cat"
+        )),
+    );
+    fs.create_file(
+        "/bin/snake",
+        File::regular(include_bytes_aligned::include_bytes_aligned!(
+            32,
+            "../../../build/userspace/bin/snake"
         )),
     );
 

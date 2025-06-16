@@ -1,6 +1,5 @@
 use core::fmt::Write as _;
 use log::LevelFilter;
-use ringbuffer::RingBuffer;
 
 use crate::term;
 pub struct KernelLogger {

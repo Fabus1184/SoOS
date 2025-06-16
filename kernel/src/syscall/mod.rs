@@ -20,7 +20,7 @@ fn copy_string_from_user(string: generated::string_const_t) -> String {
 
 fn print(pid: u32, arg: &mut generated::syscall_print_t) {
     let string = copy_string_from_user(arg.message);
-    write!(crate::TERM.writer(), "{string}").expect("Failed to write to terminal");
+    write!(crate::term::TERM.writer(), "{string}").expect("Failed to write to terminal");
 
     log::debug!("[{pid}]: {string}");
 }
@@ -34,7 +34,7 @@ fn sleep(pid: u32, arg: &mut generated::syscall_sleep_t) {
         );
 
         p.state = crate::process::State::Sleeping(unsafe {
-            crate::i8253::TIMER0.ticks() + arg.milliseconds as u64 / 10
+            crate::i8253::TIMER0.ticks() + arg.milliseconds as u64 / 100
         });
     });
 }
@@ -492,13 +492,12 @@ fn map_framebuffer(pid: u32, arg: &mut generated::syscall_map_framebuffer_t) {
 
     let mut kernel_paging = crate::kernel_paging();
     let mut process = PROCESSES.process_mut(pid);
+    let term = &crate::term::TERM;
 
-    let size = crate::term::TERM.framebuffer.height * crate::term::TERM.framebuffer.width * 4;
+    let size = (term.height_pixels * term.width_pixels * 4) as u64;
 
     let start_phys_address = kernel_paging
-        .translate_addr(x86_64::VirtAddr::new(
-            crate::term::TERM.framebuffer.ptr as u64,
-        ))
+        .translate_addr(x86_64::VirtAddr::new(term.ptr_pixels as u64))
         .expect("Failed to translate framebuffer address");
     let start_phys_frame = start_phys_address.align_down(Size4KiB::SIZE);
 
@@ -542,8 +541,8 @@ fn map_framebuffer(pid: u32, arg: &mut generated::syscall_map_framebuffer_t) {
 
     arg.return_value = generated::syscall_map_framebuffer_return_t {
         addr: (start_address + start_phys_address.as_u64() % 0x1000) as *mut _,
-        width: crate::term::TERM.framebuffer.width as u32,
-        height: crate::term::TERM.framebuffer.height as u32,
+        width: term.width_pixels as u32,
+        height: term.height_pixels as u32,
     };
 }
 

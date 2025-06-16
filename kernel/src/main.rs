@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]
+#![feature(portable_simd)]
 #![feature(stmt_expr_attributes)]
 #![feature(never_type)]
 #![warn(clippy::pedantic)]
@@ -31,7 +32,7 @@ mod vfs;
 use core::arch::asm;
 
 use limine::request::{HhdmRequest, MemoryMapRequest, PagingModeRequest};
-use log::{debug, info, LevelFilter};
+use log::{debug, LevelFilter};
 
 use x86_64::{
     instructions::tables,
@@ -51,7 +52,6 @@ use crate::{
     driver::i8253,
     kernel::paging::{self, KernelPaging},
     stuff::memmap::SoosMemmap,
-    term::TERM,
 };
 
 static MEMMAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
@@ -95,15 +95,31 @@ fn kernel_paging() -> spin::MutexGuard<'static, KernelPaging> {
 #[no_mangle]
 unsafe extern "C" fn _start() -> ! {
     asm!("
-        mov rsp, {0}
-        jmp main
-        ",
+    mov rsp, {0}
+    jmp main
+    ",
         in(reg) KERNEL_STACK_POINTER(), options(noreturn)
     );
 }
 
 #[no_mangle]
 unsafe extern "C" fn main() -> ! {
+    // enable SSE, AVX, and x87 instructions
+    x86_64::registers::control::Cr0::update(|f| {
+        f.remove(Cr0Flags::EMULATE_COPROCESSOR);
+        f.insert(Cr0Flags::MONITOR_COPROCESSOR);
+    });
+    x86_64::registers::control::Cr4::update(|f| {
+        f.insert(x86_64::registers::control::Cr4Flags::OSFXSR);
+        f.insert(x86_64::registers::control::Cr4Flags::OSXMMEXCPT_ENABLE);
+        f.insert(x86_64::registers::control::Cr4Flags::OSXSAVE);
+    });
+    x86_64::registers::xcontrol::XCr0::write(
+        x86_64::registers::xcontrol::XCr0::read()
+            | x86_64::registers::xcontrol::XCr0Flags::AVX
+            | x86_64::registers::xcontrol::XCr0Flags::SSE
+            | x86_64::registers::xcontrol::XCr0Flags::X87,
+    );
     kernel::logger::KERNEL_LOGGER.init(LevelFilter::Debug);
 
     static mut TSS: TaskStateSegment = TaskStateSegment::new();
@@ -158,17 +174,6 @@ unsafe extern "C" fn main() -> ! {
         paging.mode() == limine::paging::Mode::FOUR_LEVEL,
         "Bootloader did not set up 4-level paging!"
     );
-
-    {
-        let fb = &term::TERM.framebuffer;
-        log::debug!(
-            "framebuffer {}x{} (pitch {}) at {:#x}",
-            fb.width,
-            fb.height,
-            fb.pitch,
-            fb.ptr as u64
-        );
-    }
 
     let hhdm = HHDM_REQUEST.get_response().expect("Failed to get HHDM!");
 
@@ -237,13 +242,16 @@ unsafe extern "C" fn main() -> ! {
                 Page::containing_address(VirtAddr::new(*KERNEL_MEMORY_START_ADDR)),
                 Page::containing_address(VirtAddr::new(*KERNEL_MEMORY_END_ADDR)),
             )
-            .chain(Page::range_inclusive(
-                Page::containing_address(VirtAddr::new(term::TERM.framebuffer.ptr as u64)),
-                Page::containing_address(VirtAddr::new(
-                    term::TERM.framebuffer.ptr as u64
-                        + term::TERM.framebuffer.width * term::TERM.framebuffer.height * 4,
-                )),
-            ))
+            .chain({
+                let term = &term::TERM;
+                Page::range_inclusive(
+                    Page::containing_address(VirtAddr::new(term.ptr_pixels as u64)),
+                    Page::containing_address(VirtAddr::new(
+                        term.ptr_pixels as u64
+                            + term.width_pixels as u64 * term.height_pixels as u64 * 4,
+                    )),
+                )
+            })
             .chain(Page::range(
                 Page::containing_address(VirtAddr::new(
                     kernel::paging::KERNEL_FRAME_MAPPING_ADDRESS,
@@ -261,23 +269,6 @@ unsafe extern "C" fn main() -> ! {
         let write_combining = 0x01;
         pat.write(pat.read() | (write_combining << 8));
     }
-
-    // enable SSE, AVX, and x87 instructions
-    x86_64::registers::control::Cr0::update(|f| {
-        f.remove(Cr0Flags::EMULATE_COPROCESSOR);
-        f.insert(Cr0Flags::MONITOR_COPROCESSOR);
-    });
-    x86_64::registers::control::Cr4::update(|f| {
-        f.insert(x86_64::registers::control::Cr4Flags::OSFXSR);
-        f.insert(x86_64::registers::control::Cr4Flags::OSXMMEXCPT_ENABLE);
-        f.insert(x86_64::registers::control::Cr4Flags::OSXSAVE);
-    });
-    x86_64::registers::xcontrol::XCr0::write(
-        x86_64::registers::xcontrol::XCr0::read()
-            | x86_64::registers::xcontrol::XCr0Flags::AVX
-            | x86_64::registers::xcontrol::XCr0Flags::SSE
-            | x86_64::registers::xcontrol::XCr0Flags::X87,
-    );
 
     // no allocation before this point!
     {

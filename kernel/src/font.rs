@@ -1,53 +1,78 @@
+use crate::term::Color;
+
 pub struct Font {
-    png: minipng::ImageData<'static>,
-    pub tile_size: (u32, u32),
-    columns: u32,
+    chars: [[[u8; Self::CHAR_WIDTH]; Self::CHAR_HEIGHT]; 128],
 }
-
-pub static FONT: spin::Lazy<Font> = spin::Lazy::new(|| {
-    static mut BUFFER: [u8; 1 << 19] = [0; 1 << 19];
-
-    let bytes = include_bytes!("../../font.png");
-
-    let mut png =
-        minipng::decode_png(bytes, unsafe { &mut BUFFER }).expect("Failed to decode font PNG");
-
-    png.convert_to_rgba8bpc()
-        .expect("Failed to convert font PNG to RGBA8");
-
-    Font {
-        png,
-        tile_size: (11, 20),
-        columns: 20,
-    }
-});
 
 impl Font {
-    #[inline]
-    pub fn get_pixel(&self, char: char, x: u32, y: u32) -> Option<u8> {
-        if char < ' ' || char > '~' {
-            return None; // Only handle printable ASCII characters
+    const CHAR_WIDTH: usize = 11;
+    const CHAR_HEIGHT: usize = 20;
+
+    pub fn width_pixels(&self) -> usize {
+        Self::CHAR_WIDTH
+    }
+    pub fn height_pixels(&self) -> usize {
+        Self::CHAR_HEIGHT
+    }
+
+    fn new() -> Self {
+        let buffer: &mut [u8] = {
+            static mut BUFFER: [u8; 1 << 19] = [0; 1 << 19];
+            unsafe { &mut BUFFER }
+        };
+
+        let bytes = include_bytes!("../../font.png");
+
+        let mut png = minipng::decode_png(bytes, buffer).expect("Failed to decode font PNG");
+        let columns = 20;
+
+        png.convert_to_rgba8bpc()
+            .expect("Failed to convert font PNG to RGBA8");
+
+        let mut chars = [[[0; Self::CHAR_WIDTH]; Self::CHAR_HEIGHT]; 128];
+
+        for c in ' '..'~' {
+            let char_index = (c as u32 - ' ' as u32) as usize;
+            let tile_position = (
+                (char_index % columns) * Self::CHAR_WIDTH,
+                (char_index / columns) * Self::CHAR_HEIGHT,
+            );
+
+            for y in 0..Self::CHAR_HEIGHT {
+                for x in 0..Self::CHAR_WIDTH {
+                    let pixel_index = (tile_position.1 + y) * (columns * Self::CHAR_WIDTH)
+                        + (tile_position.0 + x);
+                    let alpha = png.pixels()[pixel_index as usize * 4 + 3];
+
+                    chars[char_index][y][x] = alpha;
+                }
+            }
         }
 
-        let char_index = char as u32 - ' ' as u32;
-        let char_x = char_index % self.columns;
-        let char_y = char_index / self.columns;
+        Self { chars }
+    }
 
-        let pixel_x = char_x * self.tile_size.0 + x;
-        let pixel_y = char_y * self.tile_size.1 + y;
+    pub fn blit_char(&self, c: char, ptr: *mut Color, row_pitch: usize, color: Color) {
+        let bitmap = self
+            .chars
+            .get(c as usize - ' ' as usize)
+            .expect("Character not found in font");
 
-        let width = self.png.width();
-        let height = self.png.height();
-        if pixel_x >= width || pixel_y >= height {
-            return None; // Out of bounds
+        for row in 0..Self::CHAR_WIDTH {
+            for col in 0..Self::CHAR_HEIGHT {
+                let ptr = unsafe { ptr.add(row_pitch * row + col) };
+
+                let alpha = bitmap[row][col];
+                if alpha > 0 {
+                    let background = unsafe { ptr.read_volatile() };
+
+                    unsafe {
+                        ptr.write_volatile(color.blend(background, alpha));
+                    }
+                }
+            }
         }
-
-        let index = (pixel_y * width + pixel_x) as usize * 4; // 4 bytes per pixel (RGBA)
-        if index + 3 >= self.png.pixels().len() {
-            return None; // Out of bounds
-        }
-
-        // Return the alpha channel value (0-255)
-        Some(self.png.pixels()[index + 3])
     }
 }
+
+pub static FONT_1: spin::Lazy<Font> = spin::Lazy::new(Font::new);

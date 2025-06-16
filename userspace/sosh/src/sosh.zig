@@ -14,7 +14,7 @@ const banner =
     \\|  $$$$$$/|  $$$$$$/|  $$$$$$/| $$  | $$
     \\ \______/  \______/  \______/ |__/  |__/
     \\
-    \\          - █ the SoOS shell █ -
+    \\          - the SoOS shell -
     ++ ANSI_RESET;
 
 const Command = struct {
@@ -116,11 +116,11 @@ const commands: []const Command = &[_]Command{
                     // check if the values are set correctly
                     for (0..100 + i * 100) |j| {
                         if (testPtr[j] != j) {
-                            print("{s}Value mismatch at index {d}, expected {d}, got {d}\n", .{ ANSI_FG_RED, j, j, testPtr[j] });
+                            print("{s}Value mismatch at index {d}, expected {d}, got {d}{s}\n", .{ ANSI_FG_RED, j, j, testPtr[j], ANSI_RESET });
                             soos.exit(1);
                         }
                     }
-                    print("{s}test iteration {d} passed\n", .{ ANSI_FG_GREEN, i });
+                    print("{s}test iteration {d} passed{s}\n", .{ ANSI_FG_GREEN, i, ANSI_RESET });
                 }
             }
         }.test_,
