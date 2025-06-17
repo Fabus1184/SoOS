@@ -325,7 +325,7 @@ fn main() !void {
 
         for (0..inputLength) |i| {
             switch (inputBuffer[i]) {
-                '\x08' => {
+                '\x08', '\x7F' => {
                     if (commandLength > 0) {
                         commandLength -= 1;
                         print("\x08 \x08", .{});

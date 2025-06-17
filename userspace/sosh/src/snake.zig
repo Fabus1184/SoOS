@@ -138,9 +138,8 @@ const Snake = struct {
 
         // check if the snake has eaten the apple
         if (std.meta.eql(self.positions[0], self.apple)) {
-            if (self.len < self.positions.len) {
-                self.len += 1;
-            }
+            self.positions[self.len] = self.positions[self.len - 1];
+            self.len += 1;
 
             findApple: while (true) {
                 const newApple = .{
@@ -158,8 +157,6 @@ const Snake = struct {
                     }
                 }
             }
-
-            self.len += 1; // increase the length of the snake
 
             if (self.len >= self.positions.len) {
                 // snake is too long, reset the game
