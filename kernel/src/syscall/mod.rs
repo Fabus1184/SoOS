@@ -1,5 +1,5 @@
 use alloc::{string::String, vec};
-use core::fmt::Write as _;
+use core::fmt::Write;
 use log::trace;
 use x86_64::structures::paging::{
     FrameAllocator, FrameDeallocator as _, Mapper, Page, PageSize, PageTableFlags, Size4KiB,
@@ -8,18 +8,22 @@ use x86_64::structures::paging::{
 
 use crate::process::{MappedPage, PROCESSES};
 
-pub mod generated;
+pub mod generated {
+    #![allow(clippy::all)]
+    #![allow(warnings)]
+    include!("generated.rs");
+}
 
-fn copy_string_from_user(string: generated::string_const_t) -> String {
+fn copy_string_t_from_user(string: generated::string_const_t) -> String {
     let mut bytes = vec![0; string.len as usize];
     for (i, byte) in bytes.iter_mut().enumerate() {
-        *byte = unsafe { (string.ptr as *const u8).add(i).read_volatile() };
+        *byte = unsafe { string.ptr.cast::<u8>().add(i).read_volatile() };
     }
     String::from_utf8(bytes).expect("Invalid UTF-8 string")
 }
 
 fn print(pid: u32, arg: &mut generated::syscall_print_t) {
-    let string = copy_string_from_user(arg.message);
+    let string = copy_string_t_from_user(arg.message);
     write!(crate::term::TERM.writer(), "{string}").expect("Failed to write to terminal");
 
     log::debug!("[{pid}]: {string}");
@@ -68,7 +72,7 @@ fn exit(pid: u32, arg: &mut generated::syscall_exit_t) {
 fn list_directory(pid: u32, arg: &mut generated::syscall_listdir_t) {
     let process = PROCESSES.process(pid);
 
-    let path = copy_string_from_user(arg.path);
+    let path = copy_string_t_from_user(arg.path);
 
     let mut fs = crate::FILE_SYSTEM
         .try_lock()
@@ -282,10 +286,12 @@ fn read(pid: u32, arg: &mut generated::syscall_read_t) {
                         }
                     }
                     crate::process::FileDescriptor::Terminal => todo!(),
+                    crate::process::FileDescriptor::Serial => todo!(),
                 }
             }
         },
         crate::process::FileDescriptor::Terminal => todo!(),
+        crate::process::FileDescriptor::Serial => todo!(),
     }
 }
 
@@ -309,7 +315,7 @@ fn fork(pid: u32, arg: &mut generated::syscall_fork_t) {
 /// Open a file at the path in rbx, with the length in rcx
 /// Returns the file descriptor in rax
 fn open(pid: u32, arg: &mut generated::syscall_open_t) {
-    let path = copy_string_from_user(arg.path);
+    let path = copy_string_t_from_user(arg.path);
 
     log::trace!("syscall_handler: open '{path}'");
 
@@ -454,11 +460,11 @@ fn munmap(pid: u32, arg: &mut generated::syscall_munmap_t) {
 /// Execute a new program at the path in rbx (length in rcx), with the number of arguments in rdx
 /// arguments in r8 is a pointer to the list of length-prefixed strings
 fn execve(pid: u32, arg: &mut generated::syscall_execve_t) {
-    let path = copy_string_from_user(arg.path);
+    let path = copy_string_t_from_user(arg.path);
 
     let mut argv = vec![String::new(); arg.argv_len as usize];
     for i in 0..arg.argv_len as usize {
-        argv[i] = copy_string_from_user(unsafe { arg.argv.add(i).read_volatile() });
+        argv[i] = copy_string_t_from_user(unsafe { arg.argv.add(i).read_volatile() });
     }
 
     log::debug!(
@@ -620,6 +626,28 @@ fn write(pid: u32, arg: &mut generated::syscall_write_t) {
                 )
             });
             writer.write_str(&str).expect("Failed to write to terminal");
+
+            arg.return_value.bytes_written = arg.len;
+            arg.return_value.error = generated::SYSCALL_WRITE_ERROR_NONE;
+        }
+        crate::process::FileDescriptor::Serial => {
+            let mut writer = crate::driver::serial::com1()
+                .expect("Failed to get serial port")
+                .writer();
+            let mut vec = vec![0; arg.len as usize];
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    arg.buf.cast::<u8>(),
+                    vec.as_mut_ptr(),
+                    arg.len as usize,
+                );
+            }
+
+            for byte in vec {
+                writer
+                    .write_char(byte as char)
+                    .expect("Failed to write to serial port");
+            }
 
             arg.return_value.bytes_written = arg.len;
             arg.return_value.error = generated::SYSCALL_WRITE_ERROR_NONE;

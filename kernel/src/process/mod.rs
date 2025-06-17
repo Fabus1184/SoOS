@@ -6,6 +6,8 @@ use x86_64::structures::paging::{FrameDeallocator, Mapper};
 
 use crate::kernel::paging::UserspacePaging;
 
+mod elf;
+
 struct PidFactory {
     next_pid: AtomicU32,
 }
@@ -72,6 +74,7 @@ pub enum FileDescriptor {
         stream_type: OwnedStreamType,
     },
     Terminal,
+    Serial,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +83,7 @@ pub enum OwnedStreamType {
     Stdout,
     Keyboard,
     Mouse,
+    Serial,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -244,7 +248,7 @@ impl Process {
         let mut userspace_paging = kernel_paging.make_userspace_paging();
 
         let (userspace_address, userspace_stack, mapped_pages) =
-            crate::elf::load::<&str>(&mut userspace_paging, &mut kernel_paging, elf, &[]);
+            elf::load::<&str>(&mut userspace_paging, &mut kernel_paging, elf, &[]);
 
         log::debug!("elf for pid {pid} loaded at address {userspace_address:#x}, stack at {userspace_stack:#x}");
 
@@ -302,7 +306,7 @@ impl Process {
         }
 
         let (userspace_address, userspace_stack, mapped_pages) =
-            crate::elf::load(&mut self.paging, &mut kernel_paging, elf, args);
+            elf::load(&mut self.paging, &mut kernel_paging, elf, args);
 
         log::debug!(
             "elf for pid {} loaded at address {:#x}, stack at {:#x}",
@@ -373,6 +377,7 @@ impl Process {
                         }
                     },
                     FileDescriptor::Terminal => todo!(),
+                    FileDescriptor::Serial => todo!(),
                 }
             }
             _ => {}
@@ -435,6 +440,12 @@ impl Process {
             .expect("File descriptor 1 not found") = FileDescriptor::Terminal;
     }
 
+    pub fn redirect_stdout_to_serial(&mut self) {
+        *self
+            .file_descriptor_mut(1)
+            .expect("File descriptor 1 not found") = FileDescriptor::Serial;
+    }
+
     pub fn redirect_keyboard_to_stdin(&mut self) {
         *self
             .file_descriptor_mut(0)
@@ -442,6 +453,16 @@ impl Process {
             buffer: alloc::collections::vec_deque::VecDeque::new(),
             max_size: 1024,
             stream_type: OwnedStreamType::Keyboard,
+        };
+    }
+
+    pub fn redirect_serial_to_stdin(&mut self) {
+        *self
+            .file_descriptor_mut(0)
+            .expect("File descriptor 0 not found") = FileDescriptor::OwnedStream {
+            buffer: alloc::collections::vec_deque::VecDeque::new(),
+            max_size: 1024,
+            stream_type: OwnedStreamType::Serial,
         };
     }
 }

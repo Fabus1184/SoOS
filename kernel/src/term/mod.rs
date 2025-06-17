@@ -123,16 +123,26 @@ impl Term {
         let position = self.current_pixel_position();
         match c {
             ' ' => {
-                for x in 0..self.font.width_pixels() {
-                    for y in 0..self.font.height_pixels() {
-                        self.putpixel(position.0 + x, position.1 + y, self.bg.get());
+                for y in 0..self.font.height_pixels() {
+                    unsafe {
+                        self.font.simd_width(self.bg.get()).store_select_ptr(
+                            self.ptr_pixels
+                                .add((position.1 + y) * self.width_pixels + position.0)
+                                .cast::<u32>(),
+                            core::simd::Mask::from_bitmask(u64::MAX),
+                        );
                     }
                 }
             }
             '█' => {
-                for x in 0..self.font.width_pixels() {
-                    for y in 0..self.font.height_pixels() {
-                        self.putpixel(position.0 + x, position.1 + y, self.fg.get());
+                for y in 0..self.font.height_pixels() {
+                    unsafe {
+                        self.font.simd_width(self.fg.get()).store_select_ptr(
+                            self.ptr_pixels
+                                .add((position.1 + y) * self.width_pixels + position.0)
+                                .cast::<u32>(),
+                            core::simd::Mask::from_bitmask(u64::MAX),
+                        );
                     }
                 }
             }
@@ -152,13 +162,20 @@ impl Term {
     }
 
     fn scroll(&self) {
-        for line in 0..self.rows() - 1 {
+        // copy in chunks of 64 pixels
+        let chunks = self.width_pixels * (self.height_pixels - self.font.height_pixels()) / 64;
+        for i in 0..chunks {
+            let mask = core::simd::Mask::from_bitmask(u64::MAX);
+
             unsafe {
-                core::ptr::copy_nonoverlapping(
-                    self.pixel_ptr(0, line + 1),
-                    self.pixel_ptr(0, line),
-                    self.width_pixels * self.font.height_pixels(),
-                );
+                core::simd::u32x64::load_select_ptr(
+                    self.ptr_pixels
+                        .cast::<u32>()
+                        .add(i * 64 + self.width_pixels * self.font.height_pixels()),
+                    mask,
+                    core::simd::u32x64::splat(0x00),
+                )
+                .store_select_ptr(self.ptr_pixels.cast::<u32>().add(i * 64), mask);
             }
         }
 

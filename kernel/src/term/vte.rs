@@ -64,7 +64,7 @@ impl vte::Perform for Writer<'_> {
                 self.term.x.set(0);
                 self.term.y.set(0);
             }
-            ('H', &[&[x], &[y]]) if x > 0 && y > 0 => {
+            ('H', &[&[y], &[x]]) if x > 0 && y > 0 => {
                 self.term.x.set((x - 1) as usize); // Convert to zero-based index
                 self.term.y.set((y - 1) as usize); // Convert to zero-based index
             }

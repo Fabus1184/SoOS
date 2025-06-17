@@ -15,8 +15,6 @@
 extern crate alloc;
 
 mod driver;
-mod elf;
-mod events;
 mod idt;
 mod io;
 mod kernel;
@@ -119,6 +117,7 @@ unsafe extern "C" fn main() -> ! {
             | x86_64::registers::xcontrol::XCr0Flags::SSE
             | x86_64::registers::xcontrol::XCr0Flags::X87,
     );
+
     kernel::logger::KERNEL_LOGGER.init(LevelFilter::Debug);
 
     static mut TSS: TaskStateSegment = TaskStateSegment::new();
@@ -287,15 +286,27 @@ unsafe extern "C" fn main() -> ! {
         vfs::root::init_fs(&mut FILE_SYSTEM.lock());
     }
 
-    let mut process = process::Process::user_from_elf(
+    let mut process1 = process::Process::user_from_elf(
         ucs,
         uds,
         0x202,
         include_bytes_aligned::include_bytes_aligned!(32, "../../build/userspace/bin/sosh"),
     );
-    process.redirect_stdout_to_term();
-    process.redirect_keyboard_to_stdin();
-    process::PROCESSES.add_process(process);
+    process1.redirect_stdout_to_term();
+    process1.redirect_keyboard_to_stdin();
+    process::PROCESSES.add_process(process1);
+
+    if driver::serial::com1().is_ok() {
+        let mut process2 = process::Process::user_from_elf(
+            ucs,
+            uds,
+            0x202,
+            include_bytes_aligned::include_bytes_aligned!(32, "../../build/userspace/bin/sosh"),
+        );
+        process2.redirect_stdout_to_serial();
+        process2.redirect_serial_to_stdin();
+        process::PROCESSES.add_process(process2);
+    }
 
     log::info!("kernel initialization complete, starting scheduler");
 

@@ -251,6 +251,40 @@ extern "C" fn irq_handler(
                 }
             }
         },
+        4 => {
+            // Serial port interrupt
+            let mut buffer: [u8; 64] = [0; 64];
+            let count = crate::driver::serial::com1()
+                .expect("Failed to get serial port")
+                .read_bytes(&mut buffer);
+            let bytes = &buffer[..count];
+
+            if count > 0 {
+                for process in crate::process::PROCESSES.processes_mut().iter_mut() {
+                    let pid = process.pid();
+                    for (_, fd) in process.file_descriptors_mut() {
+                        if let process::FileDescriptor::OwnedStream {
+                            buffer,
+                            max_size,
+                            stream_type,
+                        } = fd
+                        {
+                            if *stream_type == crate::process::OwnedStreamType::Serial {
+                                if buffer.len() + count <= *max_size {
+                                    buffer.extend(bytes);
+                                } else {
+                                    warn!(
+                                        "serial buffer overflow in process {pid}: buffer size {} exceeds max size {}",
+                                        buffer.len(),
+                                        max_size
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         12 => {
             let status = unsafe { <u8 as PortRead>::read_from_port(0x64) };
             if status & 0x20 != 0 {
@@ -271,7 +305,7 @@ extern "C" fn irq_handler(
                     -(byte3 as i8)
                 };
 
-                let event = crate::events::mouse_event_t {
+                let event = crate::types::mouse_event_t {
                     x_movement,
                     y_movement,
                     left_button_pressed: u8::from(left_button),
@@ -292,8 +326,8 @@ extern "C" fn irq_handler(
                                 if buffer.len() < *max_size {
                                     let bytes = unsafe {
                                         core::mem::transmute::<
-                                            crate::events::mouse_event_t,
-                                            [u8; size_of::<crate::events::mouse_event_t>()],
+                                            crate::types::mouse_event_t,
+                                            [u8; size_of::<crate::types::mouse_event_t>()],
                                         >(event)
                                     };
                                     buffer.extend(bytes);

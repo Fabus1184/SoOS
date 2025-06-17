@@ -19,7 +19,7 @@ const banner =
 
 const Command = struct {
     name: []const u8,
-    run: *const fn (argc: u32, argv: []const []const u8) anyerror!void,
+    run: *const fn (argv: []const []const u8) anyerror!void,
 };
 
 const ANSI_RESET = "\x1b[0m";
@@ -45,7 +45,7 @@ fn print(comptime message: []const u8, args: anytype) void {
 
 const commands: []const Command = &[_]Command{
     .{ .name = "help", .run = struct {
-        fn help(_: u32, _: []const []const u8) !void {
+        fn help(_: []const []const u8) !void {
             print("available commands:\n", .{});
             for (commands) |cmd| {
                 print("* {s}{s}{s}\n", .{ ANSI_FG_MAGENTA, cmd.name, ANSI_RESET });
@@ -53,20 +53,20 @@ const commands: []const Command = &[_]Command{
         }
     }.help },
     .{ .name = "clear", .run = struct {
-        fn clear(_: u32, _: []const []const u8) !void {
+        fn clear(_: []const []const u8) !void {
             reset();
         }
     }.clear },
     .{ .name = "exit", .run = struct {
-        fn exit(_: u32, _: []const []const u8) !void {
+        fn exit(_: []const []const u8) !void {
             soos.exit(0);
         }
     }.exit },
     .{
         .name = "ls",
         .run = struct {
-            fn ls(argc: u32, argv: []const []const u8) !void {
-                if (argc != 2) {
+            fn ls(argv: []const []const u8) !void {
+                if (argv.len != 2) {
                     print("usage: ls <directory>\n", .{});
                     return;
                 }
@@ -86,7 +86,7 @@ const commands: []const Command = &[_]Command{
     .{
         .name = "fork",
         .run = struct {
-            fn fork(_: u32, _: []const []const u8) !void {
+            fn fork(_: []const []const u8) !void {
                 const pid = soos.fork();
                 if (pid == 0) {
                     print("Hello from the child process!\n", .{});
@@ -100,7 +100,7 @@ const commands: []const Command = &[_]Command{
     .{
         .name = "test",
         .run = struct {
-            fn test_(_: u32, _: []const []const u8) !void {
+            fn test_(_: []const []const u8) !void {
                 const pageAllocator = soos.pageAllocator();
                 var heap = std.heap.ArenaAllocator.init(pageAllocator);
                 defer heap.deinit();
@@ -128,8 +128,8 @@ const commands: []const Command = &[_]Command{
     .{
         .name = "gui",
         .run = struct {
-            fn exec(argc: u32, _: []const []const u8) !void {
-                if (argc != 1) {
+            fn exec(argv: []const []const u8) !void {
+                if (argv.len != 1) {
                     print("usage: gui\n", .{});
                     return;
                 }
@@ -197,7 +197,62 @@ const commands: []const Command = &[_]Command{
             }
         }.exec,
     },
+    .{
+        .name = "time",
+        .run = struct {
+            fn time(argv: []const []const u8) !void {
+                if (argv.len < 2) {
+                    print("usage: time <command> [args...]\n", .{});
+                    return;
+                }
+                const now = rdtsc();
+                try command(argv[1..]);
+                const elapsed = decimalPrefixed(@floatFromInt(rdtsc() - now));
+                print("\n{s}command took {d:.6}{s} cycles\n{s}", .{ ANSI_FG_CYAN, elapsed[0], @tagName(elapsed[1]), ANSI_RESET });
+            }
+        }.time,
+    },
 };
+
+const Prefix = enum {
+    n,
+    @"µ",
+    m,
+    @" ",
+    k,
+    M,
+    G,
+};
+fn decimalPrefixed(value: f32) struct { f32, Prefix } {
+    const prefixes = [_]struct { f32, Prefix }{
+        .{ 1e-9, .n },
+        .{ 1e-6, .@"µ" },
+        .{ 1e-3, .m },
+        .{ 1.0, .@" " },
+        .{ 1e3, .k },
+        .{ 1e6, .M },
+        .{ 1e9, .G },
+    };
+    const prefix = for (prefixes[1..], 0..) |p, i| {
+        if (value < p[0]) {
+            break prefixes[i];
+        }
+    } else prefixes[prefixes.len - 1];
+
+    return .{ value / prefix[0], prefix[1] };
+}
+
+pub inline fn rdtsc() u64 {
+    var hi: u32 = 0;
+    var low: u32 = 0;
+
+    asm (
+        \\rdtsc
+        : [low] "={eax}" (low),
+          [hi] "={edx}" (hi),
+    );
+    return (@as(u64, hi) << 32) | @as(u64, low);
+}
 
 fn reset() void {
     print("\x1b[2J\x1b[H{s}\n\n", .{banner});
@@ -276,7 +331,7 @@ fn main() !void {
                         print("\x08 \x08", .{});
                     }
                 },
-                '\n' => {
+                '\n', '\r' => {
                     print("\n", .{});
 
                     var argc: u32 = 0;
@@ -287,34 +342,15 @@ fn main() !void {
                         argc += 1;
                     }
 
-                    for (commands) |cmd| {
-                        if (std.mem.eql(u8, cmd.name, argv[0])) {
-                            cmd.run(argc, argv[0..argc]) catch |err| {
-                                print("error: command '{s}' failed: {}\n", .{ cmd.name, err });
-                            };
-                            break;
-                        }
-                    } else {
-                        var binList = try soos.listdir("/bin");
-                        while (binList.next()) |entry| {
-                            if (entry.type != .file) continue;
-                            if (std.mem.eql(u8, entry.name, argv[0])) {
-                                const pid = soos.fork();
-                                if (pid == 0) {
-                                    var filename: [256]u8 = undefined;
-                                    const str = try std.fmt.bufPrint(&filename, "/bin/{s}", .{entry.name});
-                                    soos.execve(str, argv[0..argc]) catch |err| {
-                                        print("error: failed to execute '{s}': {}\n", .{ entry.name, err });
-                                    };
-                                } else {
-                                    _ = try soos.waitpid(pid);
-                                }
-                                break;
-                            }
-                        } else {
-                            print("unknown command: '{s}'", .{argv[0]});
-                        }
+                    if (argc == 0) {
+                        print("\n{s}", .{prompt});
+                        commandLength = 0;
+                        continue;
                     }
+
+                    command(argv[0..argc]) catch |err| {
+                        print("error: command failed: {}\n", .{err});
+                    };
 
                     print("\n{s}", .{prompt});
 
@@ -332,4 +368,48 @@ fn main() !void {
 
         print("_", .{});
     }
+}
+
+fn command(argv: []const []const u8) !void {
+    // check for built-in commands
+    for (commands) |cmd| {
+        if (std.mem.eql(u8, cmd.name, argv[0])) {
+            try cmd.run(argv);
+            return;
+        }
+    }
+
+    // check if its a file
+    if (soos.open(argv[0]) catch null) |_| {
+        const pid = soos.fork();
+        if (pid == 0) {
+            try soos.execve(argv[0], argv);
+        } else {
+            _ = try soos.waitpid(pid);
+        }
+        return;
+    }
+
+    // check for executable in /bin
+    var binList = try soos.listdir("/bin");
+    while (binList.next()) |entry| {
+        if (entry.type != .file) continue;
+        if (std.mem.eql(u8, entry.name, argv[0])) {
+            const pid = soos.fork();
+            if (pid == 0) {
+                var filename: [256]u8 = undefined;
+                const str = try std.fmt.bufPrint(&filename, "/bin/{s}", .{entry.name});
+                soos.execve(str, argv) catch |err| {
+                    print("error: failed to execute '{s}': {}\n", .{ entry.name, err });
+                };
+            } else {
+                _ = try soos.waitpid(pid);
+            }
+
+            return;
+        }
+    }
+
+    // command not found
+    print("{s}error: command '{s}' not found{s}\n", .{ ANSI_FG_RED, argv[0], ANSI_RESET });
 }

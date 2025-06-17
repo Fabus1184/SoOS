@@ -97,6 +97,18 @@ impl log::Log for KernelLogger {
             )
             .expect("Failed to write log message");
         }
+
+        if let Ok(com1) = crate::driver::serial::com1() {
+            writeln!(
+                com1.writer(),
+                "{color}[{}] ({}:{}) {}\x1b[0m",
+                record.level(),
+                record.file().unwrap_or("unknown"),
+                record.line().unwrap_or(0),
+                record.args()
+            )
+            .expect("Failed to write log message to COM1");
+        }
     }
 
     fn flush(&self) {}

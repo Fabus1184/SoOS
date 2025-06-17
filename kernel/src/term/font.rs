@@ -15,6 +15,10 @@ impl Font {
         Self::CHAR_HEIGHT
     }
 
+    pub fn simd_width(&self, color: Color) -> core::simd::Simd<u32, { Self::CHAR_WIDTH }> {
+        core::simd::Simd::splat(color.as_u32())
+    }
+
     fn new() -> Self {
         let buffer: &mut [u8] = {
             static mut BUFFER: [u8; 1 << 19] = [0; 1 << 19];
@@ -66,7 +70,11 @@ impl Font {
 
                 if alpha > 0 {
                     unsafe {
-                        ptr.write_volatile(fg.blend(bg, alpha));
+                        ptr.write(fg.blend(bg, alpha));
+                    }
+                } else {
+                    unsafe {
+                        ptr.write(bg);
                     }
                 }
             }

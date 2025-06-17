@@ -51,6 +51,11 @@ run: build/SoOS.iso
 		-cpu max -cdrom build/SoOS.iso -d guest_errors,cpu_reset -m 8G -s \
 		-no-shutdown -no-reboot
 
+run-serial: build/SoOS.iso
+	qemu-system-x86_64 \
+		-cpu max -cdrom build/SoOS.iso -d guest_errors,cpu_reset -m 8G -s \
+		-no-shutdown -no-reboot -nographic -serial mon:stdio
+
 run-gdb: build/SoOS.iso
 	qemu-system-x86_64 \
 		-cpu max -cdrom build/SoOS.iso -d guest_errors,cpu_reset -m 8G -s \
