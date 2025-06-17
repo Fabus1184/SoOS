@@ -10,7 +10,8 @@ Booting with [Limine](https://github.com/limine-bootloader/limine).
 
 ## 'inspirational' screenshots
 
-![image](https://github.com/user-attachments/assets/f808ab47-6347-4b32-82ba-b1b55cb897f9)
+![image](https://github.com/user-attachments/assets/829adf15-2d85-406d-90e0-620af28c65b8)
+
 
 
 ## Done
