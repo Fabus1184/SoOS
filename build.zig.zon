@@ -1,0 +1,16 @@
+.{
+    .name = .soos,
+    .version = "0.0.0",
+    .fingerprint = 0x302c0b9d2bafb7cf,
+    .minimum_zig_version = "0.14.0",
+    .dependencies = .{
+        .kernel = .{
+            .path = "kernel",
+        },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+    },
+}
