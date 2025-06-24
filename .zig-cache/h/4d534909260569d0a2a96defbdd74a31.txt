@@ -1,2 +1,0 @@
-0
-557 47448526 1750423973994008259 3dc0a408631aff8c5530c7151f00a20e 0 /home/fabian/git/SoOS-zig/kernel/src/gdt.s

@@ -68,7 +68,7 @@ pub fn build(b: *std.Build) !void {
         "8G",
         "-s",
         "-no-shutdown",
-        "-no-reboot",
+        //"-no-reboot",
         "-drive",
         "file=build/SoOS.iso,media=cdrom",
         "-boot",

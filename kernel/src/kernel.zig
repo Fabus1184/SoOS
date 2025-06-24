@@ -7,11 +7,17 @@ const TSS = @import("tss.zig").TSS;
 const paging = @import("paging.zig");
 const limine = @import("limine.zig");
 
+extern const _START_KERNEL_MEMORY: *anyopaque;
+extern const _END_KERNEL_MEMORY: *anyopaque;
+
 const _KERNEL_STACK_SIZE: usize = 0x1_000_000;
 var _KERNEL_STACK: [_KERNEL_STACK_SIZE]u8 align(16) = undefined;
 
-const _INTERRUPT_STACK_SIZE: usize = 0x1_000;
+const _INTERRUPT_STACK_SIZE: usize = 0x100_000;
 var _INTERRUPT_STACK: [_INTERRUPT_STACK_SIZE]u8 align(16) = undefined;
+
+const _KERNEL_HEAP_SIZE: usize = 0x10_000_000;
+var _KERNEL_HEAP: [_KERNEL_HEAP_SIZE]u8 align(16) = undefined;
 
 export fn _start() callconv(.naked) noreturn {
     asm volatile (
@@ -95,14 +101,15 @@ pub const panic = std.debug.FullPanic(struct {
 }.panic);
 
 fn main() !void {
-    const fb = limine.LIMINE_FRAMEBUFFER_REQUEST.response.*.framebuffers[0];
+    const framebuffer = limine.LIMINE_FRAMEBUFFER_REQUEST.response.*.framebuffers[0];
 
-    var term = Term.init(fb.*.address.?, fb.*.width, fb.*.height) catch |err| earlyPanic(err);
+    var term = Term.init(framebuffer.*.address.?, framebuffer.*.width, framebuffer.*.height) catch |err| earlyPanic(err);
     term.clear(Term.Color.BLACK);
     _LOG_TERM = &term;
 
     std.log.info("SoOS version 0.1.0", .{});
-    std.log.debug("framebuffer: {}x{}@{}bpp", .{ fb.*.width, fb.*.height, fb.*.bpp });
+    std.log.debug("kernel memory: 0x{x}..0x{x}", .{ @intFromPtr(&_START_KERNEL_MEMORY), @intFromPtr(&_END_KERNEL_MEMORY) });
+    std.log.debug("framebuffer: {}x{}@{}bpp", .{ framebuffer.*.width, framebuffer.*.height, framebuffer.*.bpp });
     std.log.debug("stack is at 0x{x}..0x{x}", .{
         @intFromPtr(&_KERNEL_STACK[0]),
         @intFromPtr(&_KERNEL_STACK[0]) + _KERNEL_STACK_SIZE,
@@ -162,26 +169,30 @@ fn main() !void {
     std.log.debug("returned after breakpoint handler", .{});
 
     var p = paging.OffsetPageTable.fromCurrent(limine.LIMINE_HHDM_REQUEST.response.*.offset);
-    var it = p.iterator();
-    while (it.next()) |entry| {
-        std.log.debug("page table entry: 0x{x} ({s}) => 0x{x}", .{
-            entry.virtualAddress,
-            @tagName(entry.size),
-            entry.physicalAddress,
-        });
-    }
+    p.load();
 
     // translate framebuffer pointer
     {
-        const t = p.translate(@intFromPtr(fb.*.address.?));
+        const t = p.translate(@intFromPtr(framebuffer.*.address.?));
         std.log.debug("address 0x{x} translates to {?}", .{
-            @intFromPtr(fb.*.address.?),
+            @intFromPtr(framebuffer.*.address.?),
             t,
         });
     }
 
     const frameAllocator = paging.FRAME_ALLOCATOR.init(memmap, &p);
-    _ = frameAllocator;
+
+    p.keep(&.{
+        .{ @intFromPtr(&_START_KERNEL_MEMORY), @intFromPtr(&_END_KERNEL_MEMORY) },
+        .{
+            @intFromPtr(framebuffer.*.address.?),
+            @intFromPtr(framebuffer.*.address.?) + framebuffer.*.width * framebuffer.*.height * 4,
+        },
+    }, frameAllocator);
+    std.log.debug("paging initialized", .{});
+    p.load();
+
+    //var kernelAllocator = std.heap.FixedBufferAllocator.init(&_KERNEL_HEAP);
 
     std.log.info("nothing more to do, bye!", .{});
 
