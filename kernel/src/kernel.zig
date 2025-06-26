@@ -1,11 +1,12 @@
 const std = @import("std");
 
 const Term = @import("term/term.zig").Term;
-const IDT = @import("idt.zig").IDT;
+const idt = @import("idt.zig");
 const GDT = @import("gdt.zig").GDT;
 const TSS = @import("tss.zig").TSS;
 const paging = @import("paging.zig");
 const limine = @import("limine.zig");
+const elf = @import("elf.zig");
 
 extern const _START_KERNEL_MEMORY: *anyopaque;
 extern const _END_KERNEL_MEMORY: *anyopaque;
@@ -29,9 +30,9 @@ export fn _start() callconv(.naked) noreturn {
 }
 
 export fn _init() noreturn {
-    // enable SSE, AVX, and x87 instructions
     asm volatile (
         \\
+        // enable SSE, AVX, and x87 instructions
         // CR0 remove EMULATE_COPROCESSOR flag, set MONITOR_COPROCESSOR flag
         \\ mov %cr0, %rax
         \\ and $~(1 << 2), %rax
@@ -49,8 +50,9 @@ export fn _init() noreturn {
         \\
         ::: "rax", "rcx", "rdx", "memory");
 
-    main() catch {
-        @trap();
+    main() catch |err| {
+        std.log.err("kernel main returned with an error: {}", .{err});
+        @panic("kernel main returned with an error");
     };
 
     @panic("kernel main returned unexpectedly");
@@ -156,13 +158,13 @@ fn main() !void {
     );
     std.log.debug("current code segment: {x}", .{currentCodeSegment});
 
-    var idt align(16) = IDT.init();
+    var IDT align(16) = idt.IDT.init();
 
-    idt.setInterruptHandler(.breakpoint, .ring0, @as(*const anyopaque, breakpointHandler), kernelCodeSegment);
-    idt.setExceptionHandler(.generalProtectionFault, .ring0, @as(*const anyopaque, generalProtectionFault), kernelCodeSegment);
-    idt.setExceptionHandler(.pageFault, .ring0, @as(*const anyopaque, pageFault), kernelCodeSegment);
+    IDT.setInterruptHandler(.breakpoint, .ring0, breakpointHandler, kernelCodeSegment);
+    IDT.setExceptionHandler(.generalProtectionFault, .ring0, generalProtectionFault, kernelCodeSegment);
+    IDT.setExceptionHandler(.pageFault, .ring0, pageFault, kernelCodeSegment);
 
-    idt.load();
+    IDT.load();
 
     @breakpoint();
 
@@ -171,18 +173,10 @@ fn main() !void {
     var p = paging.OffsetPageTable.fromCurrent(limine.LIMINE_HHDM_REQUEST.response.*.offset);
     p.load();
 
-    // translate framebuffer pointer
-    {
-        const t = p.translate(@intFromPtr(framebuffer.*.address.?));
-        std.log.debug("address 0x{x} translates to {?}", .{
-            @intFromPtr(framebuffer.*.address.?),
-            t,
-        });
-    }
-
     const frameAllocator = paging.FRAME_ALLOCATOR.init(memmap, &p);
 
     p.keep(&.{
+        .{ limine.LIMINE_HHDM_REQUEST.response.*.offset, limine.LIMINE_HHDM_REQUEST.response.*.offset + 0x800000000 },
         .{ @intFromPtr(&_START_KERNEL_MEMORY), @intFromPtr(&_END_KERNEL_MEMORY) },
         .{
             @intFromPtr(framebuffer.*.address.?),
@@ -194,6 +188,30 @@ fn main() !void {
 
     //var kernelAllocator = std.heap.FixedBufferAllocator.init(&_KERNEL_HEAP);
 
+    var userspacePaging = p.clone();
+    const e = try elf.Elf.load(@embedFile("userspace-build/x86_64-unknown-none/debug/sosh"), &userspacePaging, frameAllocator);
+
+    const userStackAddress = 0x8000_0000_0000 - 0x40000; // 2MiB stack at the top of the address space
+    const frame = try frameAllocator.allocateFrame(.@"2MiB");
+    std.log.debug("user stack in frame 0x{x}", .{frame});
+    try userspacePaging.map(
+        frameAllocator,
+        userStackAddress,
+        frame,
+        .@"2MiB",
+        .{ .writable = true, .userAccessible = true },
+    );
+
+    std.log.debug("jumping to userspace (0x{x})", .{e.entry});
+
+    iretToUserspace(
+        @bitCast(userDataSegment),
+        @bitCast(userCodeSegment),
+        e.entry,
+        userStackAddress + 0x40000,
+        0x202,
+    );
+
     std.log.info("nothing more to do, bye!", .{});
 
     while (true) {
@@ -201,24 +219,43 @@ fn main() !void {
     }
 }
 
-const InterruptStackFrame = packed struct(u320) {
-    instructionPointer: u64,
+fn iretToUserspace(
+    dataSegment: u16,
     codeSegment: u16,
-    _0: u48,
-    flags: u64,
+    instructionPointer: u64,
     stackPointer: u64,
-    stackSegment: u16,
-    _1: u48,
-};
+    flags: u64,
+) noreturn {
+    asm volatile (
+        \\ mov %[dataSegment], %ds
+        \\ mov %[dataSegment], %es
+        \\ mov %[dataSegment], %fs
+        \\ mov %[dataSegment], %gs
+        \\ push %[dataSegment]
+        \\ push %[stackPointer]
+        \\ push %[flags]
+        \\ push %[codeSegment]
+        \\ push %[instructionPointer]
+        \\ iretq
+        :
+        : [instructionPointer] "r" (instructionPointer),
+          [codeSegment] "r" (@as(u64, @intCast(codeSegment))),
+          [flags] "r" (flags),
+          [stackPointer] "r" (stackPointer),
+          [dataSegment] "r" (@as(u64, @intCast(dataSegment))),
+        : "memory"
+    );
+    @panic("iret should not return");
+}
 
 fn breakpointHandler(
-    stackFrame: *InterruptStackFrame,
+    stackFrame: *idt.InterruptStackFrame,
 ) callconv(.{ .x86_64_interrupt = .{} }) void {
     std.log.debug("breakpoint hit at rip 0x{x}, rsp 0x{x}", .{ stackFrame.instructionPointer, stackFrame.stackPointer });
 }
 
 fn generalProtectionFault(
-    stackFrame: *InterruptStackFrame,
+    stackFrame: *idt.InterruptStackFrame,
     errorCode: u64,
 ) callconv(.{ .x86_64_interrupt = .{} }) noreturn {
     std.log.err("general protection fault at rip 0x{x}, rsp 0x{x}, error code: 0x{x}", .{
@@ -230,13 +267,31 @@ fn generalProtectionFault(
 }
 
 fn pageFault(
-    stackFrame: *InterruptStackFrame,
+    stackFrame: *idt.InterruptStackFrame,
     errorCode: u64,
 ) callconv(.{ .x86_64_interrupt = .{} }) noreturn {
-    std.log.err("page fault at rip 0x{x}, rsp 0x{x}, error code: 0x{x}", .{
+    const Error = packed struct(u64) {
+        pageNotPresent: bool,
+        write: bool,
+        userMode: bool,
+        reserved: bool,
+        instructionFetch: bool,
+        _: u59,
+    };
+
+    var address: u64 = 0;
+    asm volatile (
+        \\ mov %cr2, %[addr]
+        : [addr] "=r" (address),
+        :
+        : "memory"
+    );
+
+    std.log.err("page fault at rip 0x{x}, rsp 0x{x}, error code: {}, address: 0x{x}", .{
         stackFrame.instructionPointer,
         stackFrame.stackPointer,
-        errorCode,
+        @as(Error, @bitCast(errorCode)),
+        address,
     });
     @panic("page fault");
 }

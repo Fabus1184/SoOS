@@ -31,10 +31,7 @@ pub const GDT = struct {
                 .ring = ring,
                 .present = 1,
             },
-            .flags = .{
-                .long_mode = if (executable) 1 else 0,
-                .size_flag = if (executable) 0 else 1,
-            },
+            .flags = .{},
         });
         self.entries_count += 1;
 
@@ -57,8 +54,8 @@ pub const GDT = struct {
                 .dpl = Ring.ring0,
             },
             .flags = .{
-                .long_mode = 0,
-                .size_flag = 0,
+                .longMode = 0,
+                .sizeFlag = 0,
                 .granularity = 0,
             },
             .limit_high = @intCast((((@bitSizeOf(TSS) / 8) - 1) >> 16) & 0xF),
@@ -155,8 +152,8 @@ const SegmentDescriptor = packed struct(u64) {
 
 const Flags = packed struct(u4) {
     reserved: u1 = 0, // Reserved bits
-    long_mode: u1, // Long mode (64-bit)
-    size_flag: u1, // 0 for 16-bit segment, 1 for 32-bit segment
+    longMode: u1 = 1, // Long mode (64-bit)
+    sizeFlag: u1 = 0, // 0 for 16-bit segment, 1 for 32-bit segment
     granularity: u1 = 1, // Granularity
 };
 

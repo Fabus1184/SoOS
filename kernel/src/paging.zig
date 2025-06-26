@@ -85,40 +85,51 @@ pub const FrameAllocator = struct {
         return self;
     }
 
-    pub fn allocateFrame(self: *FrameAllocator, size: FrameSize) ?u64 {
+    /// allocate a frame of the specified size that is aligned to the same size
+    pub fn allocateFrame(self: *FrameAllocator, size: FrameSize) !u64 {
         const areas = self.areas[0..self.areasLen];
+        const frameCount = size.size() / 0x1000; // number of physical frames needed
 
-        const physFrameCount = size.size() / 0x1000; // number of physical frames needed
-
-        // find the first area that has enough space
         for (areas) |area| {
+            if (area.size < frameCount * 0x1000) {
+                continue; // not enough space in this area
+            }
+
             const bitmapSize = area.size / 0x1000;
-            const bitmap = area.bitmap[0..bitmapSize];
+            const bitmap = self.globalBitmap[area.bitmapOffset .. area.bitmapOffset + bitmapSize];
 
-            var freeCount: usize = 0;
-            var startIndex: usize = 0;
-
-            for (bitmap, 0..) |bit, index| {
-                if (!bit) {
-                    if (freeCount == 0) {
-                        startIndex = index;
-                    }
-                    freeCount += 1;
-                } else {
-                    freeCount = 0;
+            // search with alignment constraint
+            var i: usize = 0;
+            while (i + frameCount <= bitmapSize) {
+                const physAddr = area.start + i * 0x1000;
+                if ((physAddr & (size.size() - 1)) != 0) {
+                    // not aligned to size, skip to next aligned frame
+                    const nextAligned = ((physAddr + size.size() - 1) & ~(size.size() - 1));
+                    i = (nextAligned - area.start) / 0x1000;
+                    continue;
                 }
 
-                if (freeCount == physFrameCount) {
-                    // found enough free frames
-                    for (startIndex..startIndex + freeCount) |i| {
-                        bitmap[i] = true; // mark as allocated
+                // check if frames [i .. i + frameCount) are all free
+                var allFree = true;
+                for (0..frameCount) |j| {
+                    if (bitmap[i + j]) {
+                        allFree = false;
+                        break;
                     }
-                    return area.start + 0x1000 * startIndex;
+                }
+
+                if (allFree) {
+                    for (0..frameCount) |j| {
+                        bitmap[i + j] = true;
+                    }
+                    return area.start + i * 0x1000;
+                } else {
+                    i += 1;
                 }
             }
         }
 
-        return null;
+        return error.OutOfMemory;
     }
 
     pub fn deallocateFrame(self: *FrameAllocator, physAddr: u64, size: FrameSize) void {
@@ -161,31 +172,38 @@ pub const FrameSize = enum(u64) {
 };
 
 pub const PageTableEntry = packed struct(u64) {
-    present: bool,
-    writable: bool,
-    userAccessible: bool,
-    writeThrough: bool,
-    cacheDisabled: bool,
-    accessed: bool,
-    dirty: bool,
-    hugePage: bool,
-    global: bool,
-    customBit1: bool,
-    customBit2: bool,
-    customBit3: bool,
+    present: bool = false,
+    writable: bool = false,
+    userAccessible: bool = false,
+    writeThrough: bool = false,
+    cacheDisabled: bool = false,
+    accessed: bool = false,
+    dirty: bool = false,
+    hugePage: bool = false,
+    global: bool = false,
+    customBit1: bool = false,
+    customBit2: bool = false,
+    customBit3: bool = false,
     address: u40,
-    customBits4: bool,
-    customBits5: bool,
-    customBits6: bool,
-    customBits7: bool,
-    customBits8: bool,
-    customBits9: bool,
-    customBits10: bool,
-    customBits11: bool,
-    customBits12: bool,
-    customBits13: bool,
-    customBits14: bool,
-    noExecute: bool,
+    reserved: u11 = 0,
+    noExecute: bool = false,
+
+    pub fn format(self: PageTableEntry, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = .{ fmt, options };
+
+        try std.fmt.format(writer,
+            \\
+            \\|P|W|U|WT|CD|A|D|HP|G|CB1|CB2|CB3|         Addr.|Res.|NX|
+            \\|{b}|{b}|{b}|{b:2}|{b:2}|{b}|{b}|{b:2}|{b}|{b:3}|{b:3}|{b:3}|0x{x:12}|{b:4}|{b:2}|
+            \\
+        , .{
+            @intFromBool(self.present),      @intFromBool(self.writable),      @intFromBool(self.userAccessible),
+            @intFromBool(self.writeThrough), @intFromBool(self.cacheDisabled), @intFromBool(self.accessed),
+            @intFromBool(self.dirty),        @intFromBool(self.hugePage),      @intFromBool(self.global),
+            @intFromBool(self.customBit1),   @intFromBool(self.customBit2),    @intFromBool(self.customBit3),
+            @as(u64, self.address) << 12,    self.reserved,                    @intFromBool(self.noExecute),
+        });
+    }
 };
 
 /// physical addresses of frames are mapped at
@@ -209,11 +227,20 @@ pub const OffsetPageTable = struct {
             : "memory"
         );
 
-        const ptr: *align(0x1000) const [512]PageTableEntry = @ptrFromInt(self.frameVirtualAddress(current));
+        const ptr: *const [512]PageTableEntry = @ptrCast(self.frameVirtualAddress(current));
 
         @memcpy(&self.pageTable, ptr);
 
         return self;
+    }
+
+    pub fn clone(self: *const OffsetPageTable) OffsetPageTable {
+        var newTable = OffsetPageTable{
+            .offset = self.offset,
+            .pageTable = undefined,
+        };
+        @memcpy(&newTable.pageTable, &self.pageTable);
+        return newTable;
     }
 
     pub fn load(self: *const OffsetPageTable) void {
@@ -230,18 +257,23 @@ pub const OffsetPageTable = struct {
         );
     }
 
-    fn frameVirtualAddress(self: OffsetPageTable, frameAddress: u64) u64 {
-        return frameAddress + self.offset;
+    fn frameVirtualAddress(self: OffsetPageTable, frameAddress: u64) *align(0x1000) [0x1000]u8 {
+        if (frameAddress % 0x1000 != 0) {
+            std.log.err("frame address 0x{x} is not aligned to 4KiB", .{frameAddress});
+            @panic("frame address must be aligned to 4KiB");
+        }
+
+        return @ptrFromInt(frameAddress + self.offset);
     }
 
     pub fn translate(self: *const OffsetPageTable, virtualAddress: u64) ?Mapping {
         const l4Index = (virtualAddress >> 39) & 0x1FF;
-        const l4Entry = self.pageTable[l4Index];
+        const l4Entry = &self.pageTable[l4Index];
         if (!l4Entry.present) {
             return null; // not present
         }
 
-        const l3Table: *align(0x1000) [512]PageTableEntry = @ptrFromInt(self.frameVirtualAddress(l4Entry.address << 12));
+        const l3Table: *align(0x1000) [512]PageTableEntry = @ptrCast(self.frameVirtualAddress(l4Entry.address << 12));
         const l3Index = (virtualAddress >> 30) & 0x1FF;
         const l3Entry = &l3Table[l3Index];
         if (!l3Entry.present) {
@@ -254,10 +286,11 @@ pub const OffsetPageTable = struct {
                 .physicalAddress = l3Entry.address << 12,
                 .size = .@"1GiB",
                 .entry = l3Entry,
+                .entries = .{ l4Entry, l3Entry, null, null },
             };
         }
 
-        const l2Table: *align(0x1000) [512]PageTableEntry = @ptrFromInt(self.frameVirtualAddress(l3Entry.address << 12));
+        const l2Table: *align(0x1000) [512]PageTableEntry = @ptrCast(self.frameVirtualAddress(l3Entry.address << 12));
         const l2Index = (virtualAddress >> 21) & 0x1FF;
         const l2Entry = &l2Table[l2Index];
         if (!l2Entry.present) {
@@ -270,10 +303,11 @@ pub const OffsetPageTable = struct {
                 .physicalAddress = l2Entry.address << 12,
                 .size = .@"2MiB",
                 .entry = l2Entry,
+                .entries = .{ l4Entry, l3Entry, l2Entry, null },
             };
         }
 
-        const l1Table: *align(0x1000) [512]PageTableEntry = @ptrFromInt(self.frameVirtualAddress(l2Entry.address << 12));
+        const l1Table: *align(0x1000) [512]PageTableEntry = @ptrCast(self.frameVirtualAddress(l2Entry.address << 12));
         const l1Index = (virtualAddress >> 12) & 0x1FF;
         const l1Entry = &l1Table[l1Index];
         if (!l1Entry.present) {
@@ -285,7 +319,174 @@ pub const OffsetPageTable = struct {
             .physicalAddress = l1Entry.address << 12,
             .size = .@"4KiB",
             .entry = l1Entry,
+            .entries = .{ l4Entry, l3Entry, l2Entry, l1Entry },
         };
+    }
+
+    pub fn map(
+        self: *OffsetPageTable,
+        frameAllocator: *FrameAllocator,
+        virtualAddress: u64,
+        physicalAddress: u64,
+        size: FrameSize,
+        options: struct {
+            writable: bool = true,
+            userAccessible: bool = false,
+            writeThrough: bool = false,
+            cacheDisabled: bool = false,
+            global: bool = false,
+            noExecute: bool = false,
+        },
+    ) !void {
+        std.debug.assert(virtualAddress % 0x1000 == 0);
+
+        switch (size) {
+            .@"4KiB" => {
+                std.debug.assert(physicalAddress % 0x1000 == 0);
+            },
+            .@"2MiB" => {
+                std.debug.assert(physicalAddress % 0x200000 == 0);
+            },
+            .@"1GiB" => {
+                std.debug.assert(physicalAddress % 0x40000000 == 0);
+            },
+        }
+
+        const l4Index = (virtualAddress >> 39) & 0x1FF;
+        const l3Index = (virtualAddress >> 30) & 0x1FF;
+        const l2Index = (virtualAddress >> 21) & 0x1FF;
+        const l1Index = (virtualAddress >> 12) & 0x1FF;
+
+        const l4Entry = &self.pageTable[l4Index];
+        if (!l4Entry.present) {
+            // allocate a new frame
+            const frame = try frameAllocator.allocateFrame(.@"4KiB");
+            @memset(self.frameVirtualAddress(frame), 0);
+
+            l4Entry.* = PageTableEntry{
+                .present = true,
+                .writable = true,
+                .userAccessible = true,
+                .address = @intCast(frame >> 12),
+            };
+            invalidatePage(makeCanonical(l4Index << 39));
+        }
+
+        // ensure parent flags do not override child flags
+        l4Entry.writable = true;
+        l4Entry.userAccessible = true;
+        l4Entry.noExecute = false;
+        invalidatePage(makeCanonical(l4Index << 39));
+
+        const l3Table: *align(0x1000) [512]PageTableEntry = @ptrCast(self.frameVirtualAddress(l4Entry.address << 12));
+        const l3Entry = &l3Table[l3Index];
+        if (size == .@"1GiB") {
+            if (l3Entry.present) {
+                return error.MappingAlreadyExists;
+            }
+
+            l3Entry.* = PageTableEntry{
+                .present = true,
+                .writable = options.writable,
+                .userAccessible = options.userAccessible,
+                .writeThrough = options.writeThrough,
+                .cacheDisabled = options.cacheDisabled,
+                .hugePage = true,
+                .global = options.global,
+                //.noExecute = options.noExecute,
+                .address = @intCast(physicalAddress >> 12),
+            };
+            invalidatePage(makeCanonical((l4Index << 39) | (l3Index << 30)));
+            return;
+        }
+
+        if (!l3Entry.present) {
+            // allocate a new frame for the l3 table
+            const frame = try frameAllocator.allocateFrame(.@"4KiB");
+            @memset(self.frameVirtualAddress(frame), 0);
+
+            l3Entry.* = PageTableEntry{
+                .present = true,
+                .writable = true,
+                .userAccessible = true,
+                .address = @intCast(frame >> 12),
+            };
+            invalidatePage(makeCanonical((l4Index << 39) | (l3Index << 30)));
+        }
+
+        // ensure parent flags do not override child flags
+        l3Entry.writable = true;
+        l3Entry.userAccessible = true;
+        l3Entry.noExecute = false;
+        invalidatePage(makeCanonical((l4Index << 39) | (l3Index << 30)));
+
+        const l2Table: *align(0x1000) [512]PageTableEntry = @ptrCast(self.frameVirtualAddress(l3Entry.address << 12));
+        const l2Entry = &l2Table[l2Index];
+        if (size == .@"2MiB") {
+            if (l2Entry.present) {
+                return error.MappingAlreadyExists;
+            }
+
+            l2Entry.* = PageTableEntry{
+                .present = true,
+                .writable = options.writable,
+                .userAccessible = options.userAccessible,
+                .writeThrough = options.writeThrough,
+                .cacheDisabled = options.cacheDisabled,
+                .hugePage = true,
+                .global = options.global,
+                //.noExecute = options.noExecute,
+                .address = @intCast(physicalAddress >> 12),
+            };
+            invalidatePage(makeCanonical((l4Index << 39) | (l3Index << 30) | (l2Index << 21)));
+            return;
+        }
+
+        if (!l2Entry.present) {
+            // allocate a new frame for the l2 table
+            const frame = try frameAllocator.allocateFrame(.@"4KiB");
+            @memset(self.frameVirtualAddress(frame), 0);
+
+            l2Entry.* = PageTableEntry{
+                .present = true,
+                .writable = true,
+                .userAccessible = true,
+                .writeThrough = false,
+                .cacheDisabled = false,
+                .hugePage = false,
+                .global = false,
+                .noExecute = false,
+                .address = @intCast(frame >> 12),
+            };
+            invalidatePage(makeCanonical((l4Index << 39) | (l3Index << 30) | (l2Index << 21)));
+        }
+
+        // ensure parent flags do not override child flags
+        l2Entry.writable = true;
+        l2Entry.userAccessible = true;
+        l2Entry.noExecute = false;
+        invalidatePage(makeCanonical((l4Index << 39) | (l3Index << 30) | (l2Index << 21)));
+
+        const l1Table: *align(0x1000) [512]PageTableEntry = @ptrCast(self.frameVirtualAddress(l2Entry.address << 12));
+        const l1Entry = &l1Table[l1Index];
+        if (l1Entry.present) {
+            return error.MappingAlreadyExists; // already mapped
+        }
+
+        l1Entry.* = PageTableEntry{
+            .present = true,
+            .writable = options.writable,
+            .userAccessible = options.userAccessible,
+            .writeThrough = options.writeThrough,
+            .cacheDisabled = options.cacheDisabled,
+            .hugePage = false,
+            .global = options.global,
+            //.noExecute = options.noExecute,
+            .address = @intCast(physicalAddress >> 12),
+        };
+        invalidatePage(makeCanonical((l4Index << 39) | (l3Index << 30) | (l2Index << 21) | (l1Index << 12)));
+
+        return;
     }
 
     pub fn keep(self: *OffsetPageTable, rangesInclusive: []const struct { u64, u64 }, frameAllocator: *FrameAllocator) void {
@@ -325,7 +526,7 @@ pub const OffsetPageTable = struct {
                 }
 
                 for (self.l3Index..512) |l3| {
-                    const l3Table: *align(0x1000) [512]PageTableEntry = @ptrFromInt(self.pageTable.frameVirtualAddress(l4Entry.address << 12));
+                    const l3Table: *align(0x1000) [512]PageTableEntry = @ptrCast(self.pageTable.frameVirtualAddress(l4Entry.address << 12));
                     const l3Entry = &l3Table[l3];
                     if (!l3Entry.present) {
                         continue; // skip non-present entries
@@ -346,7 +547,7 @@ pub const OffsetPageTable = struct {
                     }
 
                     for (self.l2Index..512) |l2| {
-                        const l2Table: *align(0x1000) [512]PageTableEntry = @ptrFromInt(self.pageTable.frameVirtualAddress(l3Entry.address << 12));
+                        const l2Table: *align(0x1000) [512]PageTableEntry = @ptrCast(self.pageTable.frameVirtualAddress(l3Entry.address << 12));
                         const l2Entry = &l2Table[l2];
                         if (!l2Entry.present) {
                             continue; // skip non-present entries
@@ -366,7 +567,7 @@ pub const OffsetPageTable = struct {
                         }
 
                         for (self.l1Index..512) |l1| {
-                            const l1Table: *align(0x1000) [512]PageTableEntry = @ptrFromInt(self.pageTable.frameVirtualAddress(l2Entry.address << 12));
+                            const l1Table: *align(0x1000) [512]PageTableEntry = @ptrCast(self.pageTable.frameVirtualAddress(l2Entry.address << 12));
                             const l1Entry = &l1Table[l1];
                             if (!l1Entry.present) {
                                 continue; // skip non-present entries
@@ -400,6 +601,7 @@ pub const Mapping = struct {
     physicalAddress: u64,
     size: FrameSize,
     entry: *PageTableEntry,
+    entries: [4]?*const PageTableEntry = .{null} ** 4,
 };
 
 fn invalidatePage(virtualAddress: u64) void {
