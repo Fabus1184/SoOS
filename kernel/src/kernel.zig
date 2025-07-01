@@ -7,6 +7,7 @@ const TSS = @import("tss.zig").TSS;
 const paging = @import("paging.zig");
 const limine = @import("limine.zig");
 const elf = @import("elf.zig");
+const cpuid = @import("cpuid.zig");
 
 extern const _START_KERNEL_MEMORY: *anyopaque;
 extern const _END_KERNEL_MEMORY: *anyopaque;
@@ -149,6 +150,9 @@ fn main() !void {
 
     TSS.load(tssSelector);
 
+    const xsaveAreaSize = cpuid.cpuid(0xD, 0x0).ecx;
+    std.log.debug("xsave area size: {d}", .{xsaveAreaSize});
+
     var currentCodeSegment: u16 = 0x00;
     asm volatile (
         \\ mov %cs, %[cs]
@@ -161,8 +165,11 @@ fn main() !void {
     var IDT align(16) = idt.IDT.init();
 
     IDT.setInterruptHandler(.breakpoint, .ring0, breakpointHandler, kernelCodeSegment);
-    IDT.setExceptionHandler(.generalProtectionFault, .ring0, generalProtectionFault, kernelCodeSegment);
-    IDT.setExceptionHandler(.pageFault, .ring0, pageFault, kernelCodeSegment);
+    IDT.setExceptionHandler(.generalProtectionFault, .ring0, generalProtectionFaultHandler, kernelCodeSegment);
+    IDT.setExceptionHandler(.pageFault, .ring0, pageFaultHandler, kernelCodeSegment);
+    IDT.setInterruptHandler(.invalidOpcode, .ring0, invalidOpcodeHandler, kernelCodeSegment);
+
+    IDT.setIrqHandler(0x80, .ring3, syscallHandler, kernelCodeSegment);
 
     IDT.load();
 
@@ -227,6 +234,7 @@ fn iretToUserspace(
     flags: u64,
 ) noreturn {
     asm volatile (
+        \\ cli
         \\ mov %[dataSegment], %ds
         \\ mov %[dataSegment], %es
         \\ mov %[dataSegment], %fs
@@ -236,6 +244,21 @@ fn iretToUserspace(
         \\ push %[flags]
         \\ push %[codeSegment]
         \\ push %[instructionPointer]
+        \\ mov $0x6969696969696969, %rax
+        \\ mov $0x6969696969696969, %rbx
+        \\ mov $0x6969696969696969, %rcx
+        \\ mov $0x6969696969696969, %rdx
+        \\ mov $0x6969696969696969, %rsi
+        \\ mov $0x6969696969696969, %rdi
+        \\ mov $0x6969696969696969, %rbp
+        \\ mov $0x6969696969696969, %r8
+        \\ mov $0x6969696969696969, %r9
+        \\ mov $0x6969696969696969, %r10
+        \\ mov $0x6969696969696969, %r11
+        \\ mov $0x6969696969696969, %r12
+        \\ mov $0x6969696969696969, %r13
+        \\ mov $0x6969696969696969, %r14
+        \\ mov $0x6969696969696969, %r15
         \\ iretq
         :
         : [instructionPointer] "r" (instructionPointer),
@@ -251,22 +274,22 @@ fn iretToUserspace(
 fn breakpointHandler(
     stackFrame: *idt.InterruptStackFrame,
 ) callconv(.{ .x86_64_interrupt = .{} }) void {
-    std.log.debug("breakpoint hit at rip 0x{x}, rsp 0x{x}", .{ stackFrame.instructionPointer, stackFrame.stackPointer });
+    std.log.debug("breakpoint hit at rip 0x{x}, rsp 0x{x}", .{ stackFrame.rip, stackFrame.rsp });
 }
 
-fn generalProtectionFault(
+fn generalProtectionFaultHandler(
     stackFrame: *idt.InterruptStackFrame,
     errorCode: u64,
 ) callconv(.{ .x86_64_interrupt = .{} }) noreturn {
     std.log.err("general protection fault at rip 0x{x}, rsp 0x{x}, error code: 0x{x}", .{
-        stackFrame.instructionPointer,
-        stackFrame.stackPointer,
+        stackFrame.rip,
+        stackFrame.rsp,
         errorCode,
     });
     @panic("general protection fault");
 }
 
-fn pageFault(
+fn pageFaultHandler(
     stackFrame: *idt.InterruptStackFrame,
     errorCode: u64,
 ) callconv(.{ .x86_64_interrupt = .{} }) noreturn {
@@ -288,10 +311,29 @@ fn pageFault(
     );
 
     std.log.err("page fault at rip 0x{x}, rsp 0x{x}, error code: {}, address: 0x{x}", .{
-        stackFrame.instructionPointer,
-        stackFrame.stackPointer,
+        stackFrame.rip,
+        stackFrame.rsp,
         @as(Error, @bitCast(errorCode)),
         address,
     });
     @panic("page fault");
+}
+
+fn invalidOpcodeHandler(
+    stackFrame: *idt.InterruptStackFrame,
+) callconv(.{ .x86_64_interrupt = .{} }) noreturn {
+    std.log.err("invalid opcode at rip 0x{x}, rsp 0x{x}", .{
+        stackFrame.rip,
+        stackFrame.rsp,
+    });
+    @panic("invalid opcode");
+}
+
+fn syscallHandler(
+    stackFrame: *idt.InterruptStackFrame,
+    state: *idt.State,
+) callconv(.c) noreturn {
+    std.log.debug("syscall handler called with state {}, stackFrame {}", .{ state, stackFrame });
+
+    iretToUserspace(stackFrame.stackSegment, stackFrame.codeSegment, stackFrame.rip, stackFrame.rsp, stackFrame.flags);
 }

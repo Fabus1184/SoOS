@@ -19,7 +19,11 @@ pub fn build(b: *std.Build) !void {
         },
     });
 
+    const userspace = b.addSystemCommand(&.{ "cargo", "build" });
+    userspace.setCwd(b.path("userspace"));
+
     const kernel = b.dependency("kernel", .{ .target = target }).artifact("kernel.elf");
+    kernel.step.dependOn(&userspace.step);
 
     const install = b.addInstallArtifact(
         kernel,

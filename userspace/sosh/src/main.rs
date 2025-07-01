@@ -4,29 +4,24 @@
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
     unsafe {
-        core::arch::asm!(
-            "
-            and rsp, rsp, ~0xF
-            call {}
-            ",
-            sym main
-        );
+        core::arch::asm!("and rsp, ~0xF");
     }
 
-    unreachable!();
+    main();
+
+    panic!("main function returned");
 }
 
 fn main() {
-    for i in 0..100_000_000 {
-        unsafe {
-            core::arch::asm!("nop");
-        }
-    }
     loop {
-        // deference null pointer to trigger a panic
+        for i in 0..10_000_000 {
+            unsafe {
+                core::arch::asm!("nop");
+            }
+        }
+
         unsafe {
-            let ptr: *const u8 = core::ptr::null();
-            core::ptr::read_volatile(ptr);
+            core::arch::asm!("int $0x80", in("rax") 0xdeadbeef_u64);
         }
     }
 }
