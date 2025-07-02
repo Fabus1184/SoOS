@@ -217,11 +217,11 @@ const GateDescriptor = packed struct(u128) {
 pub const InterruptStackFrame = packed struct(u320) {
     rip: u64,
     codeSegment: u16,
-    _0: u48,
+    _0: u48 = 0,
     flags: u64,
     rsp: u64,
     stackSegment: u16,
-    _1: u48,
+    _1: u48 = 0,
 
     pub fn format(self: InterruptStackFrame, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try std.fmt.format(writer, "InterruptStackFrame {{ ", .{});
@@ -233,25 +233,25 @@ pub const InterruptStackFrame = packed struct(u320) {
 };
 
 pub const State = extern struct {
-    xsave: [4096]u8 align(64) = undefined,
+    xsave: [4096]u8 align(64) = .{0} ** 4096,
 
     registers: extern struct {
-        rax: u64,
-        rbx: u64,
-        rcx: u64,
-        rdx: u64,
-        rsi: u64,
-        rdi: u64,
-        rbp: u64,
-        r8: u64,
-        r9: u64,
-        r10: u64,
-        r11: u64,
-        r12: u64,
-        r13: u64,
-        r14: u64,
-        r15: u64,
-    },
+        rax: u64 = 0xFAAF_6969_FEEF_6969,
+        rbx: u64 = 0xFAAF_6969_FEEF_6969,
+        rcx: u64 = 0xFAAF_6969_FEEF_6969,
+        rdx: u64 = 0xFAAF_6969_FEEF_6969,
+        rsi: u64 = 0xFAAF_6969_FEEF_6969,
+        rdi: u64 = 0xFAAF_6969_FEEF_6969,
+        rbp: u64 = 0xFAAF_6969_FEEF_6969,
+        r8: u64 = 0xFAAF_6969_FEEF_6969,
+        r9: u64 = 0xFAAF_6969_FEEF_6969,
+        r10: u64 = 0xFAAF_6969_FEEF_6969,
+        r11: u64 = 0xFAAF_6969_FEEF_6969,
+        r12: u64 = 0xFAAF_6969_FEEF_6969,
+        r13: u64 = 0xFAAF_6969_FEEF_6969,
+        r14: u64 = 0xFAAF_6969_FEEF_6969,
+        r15: u64 = 0xFAAF_6969_FEEF_6969,
+    } = .{},
 
     pub fn format(self: State, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try std.fmt.format(writer, "State {{ .registers = {{ ", .{});

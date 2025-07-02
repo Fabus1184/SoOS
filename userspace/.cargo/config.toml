@@ -1,4 +1,4 @@
 [build]
-target = "x86_64-unknown-none"
+target = "x86_64-unknown-soos"
 target-dir = "../kernel/src/userspace-build"
 rustflags = ["-C", "relocation-model=static"]

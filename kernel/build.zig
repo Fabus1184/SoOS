@@ -39,5 +39,7 @@ pub fn build(b: *std.Build) !void {
     });
     exe.root_module.addImport("zigimg", zigimg_dependency.module("zigimg"));
 
+    exe.addIncludePath(b.path(".."));
+
     b.installArtifact(exe);
 }

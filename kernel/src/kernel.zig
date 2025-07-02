@@ -8,6 +8,7 @@ const paging = @import("paging.zig");
 const limine = @import("limine.zig");
 const elf = @import("elf.zig");
 const cpuid = @import("cpuid.zig");
+const types = @import("types.zig");
 
 extern const _START_KERNEL_MEMORY: *anyopaque;
 extern const _END_KERNEL_MEMORY: *anyopaque;
@@ -196,7 +197,7 @@ fn main() !void {
     //var kernelAllocator = std.heap.FixedBufferAllocator.init(&_KERNEL_HEAP);
 
     var userspacePaging = p.clone();
-    const e = try elf.Elf.load(@embedFile("userspace-build/x86_64-unknown-none/debug/sosh"), &userspacePaging, frameAllocator);
+    const e = try elf.Elf.load(@embedFile("userspace-build/x86_64-unknown-soos/debug/sosh"), &userspacePaging, frameAllocator);
 
     const userStackAddress = 0x8000_0000_0000 - 0x40000; // 2MiB stack at the top of the address space
     const frame = try frameAllocator.allocateFrame(.@"2MiB");
@@ -212,11 +213,14 @@ fn main() !void {
     std.log.debug("jumping to userspace (0x{x})", .{e.entry});
 
     iretToUserspace(
-        @bitCast(userDataSegment),
-        @bitCast(userCodeSegment),
-        e.entry,
-        userStackAddress + 0x40000,
-        0x202,
+        &idt.InterruptStackFrame{
+            .codeSegment = @bitCast(userCodeSegment),
+            .stackSegment = @bitCast(userDataSegment),
+            .rip = e.entry,
+            .rsp = userStackAddress + 0x40000,
+            .flags = 0x202,
+        },
+        &idt.State{},
     );
 
     std.log.info("nothing more to do, bye!", .{});
@@ -227,48 +231,59 @@ fn main() !void {
 }
 
 fn iretToUserspace(
-    dataSegment: u16,
-    codeSegment: u16,
-    instructionPointer: u64,
-    stackPointer: u64,
-    flags: u64,
+    stackFrame: *const idt.InterruptStackFrame,
+    state: *const idt.State,
 ) noreturn {
     asm volatile (
         \\ cli
-        \\ mov %[dataSegment], %ds
-        \\ mov %[dataSegment], %es
-        \\ mov %[dataSegment], %fs
-        \\ mov %[dataSegment], %gs
-        \\ push %[dataSegment]
-        \\ push %[stackPointer]
-        \\ push %[flags]
-        \\ push %[codeSegment]
-        \\ push %[instructionPointer]
-        \\ mov $0x6969696969696969, %rax
-        \\ mov $0x6969696969696969, %rbx
-        \\ mov $0x6969696969696969, %rcx
-        \\ mov $0x6969696969696969, %rdx
-        \\ mov $0x6969696969696969, %rsi
-        \\ mov $0x6969696969696969, %rdi
-        \\ mov $0x6969696969696969, %rbp
-        \\ mov $0x6969696969696969, %r8
-        \\ mov $0x6969696969696969, %r9
-        \\ mov $0x6969696969696969, %r10
-        \\ mov $0x6969696969696969, %r11
-        \\ mov $0x6969696969696969, %r12
-        \\ mov $0x6969696969696969, %r13
-        \\ mov $0x6969696969696969, %r14
-        \\ mov $0x6969696969696969, %r15
+        // push stack frame for iret
+        // ss
+        \\ push 0x20(%[stackFrame])
+        // rsp
+        \\ push 0x18(%[stackFrame])
+        // flags
+        \\ push 0x10(%[stackFrame])
+        // cs
+        \\ push 0x8(%[stackFrame])
+        // rip
+        \\ push 0x0(%[stackFrame])
+        \\
+        // load ss in all other segment registers
+        \\ mov 0x20(%[stackFrame]), %ds
+        \\ mov 0x20(%[stackFrame]), %es
+        \\ mov 0x20(%[stackFrame]), %fs
+        \\ mov 0x20(%[stackFrame]), %gs
+        // xrstor xsave area
+        \\ mov $~0, %eax
+        \\ mov $~0, %edx
+        \\ xrstor 0(%[state])
+        // restore registers
+        \\ mov (0x1000 + ( 0 * 0x8))(%rbx), %rax
+        // skip rbx for now
+        // mov (0x1000 + ( 1 * 0x8))(%rbx), %rbx
+        \\ mov (0x1000 + ( 2 * 0x8))(%rbx), %rcx
+        \\ mov (0x1000 + ( 3 * 0x8))(%rbx), %rdx
+        \\ mov (0x1000 + ( 4 * 0x8))(%rbx), %rsi
+        \\ mov (0x1000 + ( 5 * 0x8))(%rbx), %rdi
+        \\ mov (0x1000 + ( 6 * 0x8))(%rbx), %rbp
+        \\ mov (0x1000 + ( 7 * 0x8))(%rbx), %r8
+        \\ mov (0x1000 + ( 8 * 0x8))(%rbx), %r9
+        \\ mov (0x1000 + ( 9 * 0x8))(%rbx), %r10
+        \\ mov (0x1000 + (10 * 0x8))(%rbx), %r11
+        \\ mov (0x1000 + (11 * 0x8))(%rbx), %r12
+        \\ mov (0x1000 + (12 * 0x8))(%rbx), %r13
+        \\ mov (0x1000 + (13 * 0x8))(%rbx), %r14
+        \\ mov (0x1000 + (14 * 0x8))(%rbx), %r15
+        // restore rbx
+        \\ mov (0x1000 + ( 1 * 0x8))(%rbx), %rbx
+        \\
         \\ iretq
         :
-        : [instructionPointer] "r" (instructionPointer),
-          [codeSegment] "r" (@as(u64, @intCast(codeSegment))),
-          [flags] "r" (flags),
-          [stackPointer] "r" (stackPointer),
-          [dataSegment] "r" (@as(u64, @intCast(dataSegment))),
-        : "memory"
+        : [stackFrame] "{rax}" (stackFrame),
+          [state] "{rbx}" (state),
+        : "memory", "noreturn"
     );
-    @panic("iret should not return");
+    unreachable;
 }
 
 fn breakpointHandler(
@@ -335,5 +350,21 @@ fn syscallHandler(
 ) callconv(.c) noreturn {
     std.log.debug("syscall handler called with state {}, stackFrame {}", .{ state, stackFrame });
 
-    iretToUserspace(stackFrame.stackSegment, stackFrame.codeSegment, stackFrame.rip, stackFrame.rsp, stackFrame.flags);
+    switch (state.registers.rdi) {
+        types.SYSCALL_WRITE => {
+            var args: types.syscall_write_t = undefined;
+            args = @as(*types.syscall_write_t, @ptrFromInt(state.registers.rsi)).*;
+
+            const ptr: [*]const u8 = @ptrCast(args.buf.?);
+            const str: []const u8 = ptr[0..args.len];
+
+            std.log.debug("syscall write {d}: '{s}'", .{ args.fd, str });
+        },
+        else => {
+            std.log.err("unknown syscall: {d}", .{state.registers.rdi});
+            @panic("unknown syscall");
+        },
+    }
+
+    iretToUserspace(stackFrame, state);
 }

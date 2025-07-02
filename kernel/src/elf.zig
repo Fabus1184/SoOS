@@ -98,12 +98,21 @@ pub const Elf = struct {
                         i, phdr.type, phdr.flags, phdr.offset, phdr.vaddr, phdr.paddr, phdr.filesz, phdr.memsz, phdr.@"align",
                     });
 
-                    const framesNeeded = (phdr.memsz + 0xFFF) / 0x1000;
-                    for (0..framesNeeded) |f| {
+                    const startPage = phdr.vaddr & ~@as(u64, 0xFFF);
+                    const endPage = (phdr.vaddr + phdr.memsz) & ~@as(u64, 0xFFF);
+
+                    var page = startPage;
+                    while (page <= endPage) : (page += 0x1000) {
+                        // skip if the page is already mapped
+                        if (pagetable.translate(page) != null) {
+                            std.log.debug("skipping already mapped page 0x{x}", .{page});
+                            continue;
+                        }
+
                         const frame = try frameAllocator.allocateFrame(.@"4KiB");
                         try pagetable.map(
                             frameAllocator,
-                            (phdr.vaddr + f * 0x1000) & ~@as(u64, 0xFFF),
+                            page,
                             frame,
                             .@"4KiB",
                             .{
@@ -113,6 +122,10 @@ pub const Elf = struct {
                                 .noExecute = (phdr.flags & 0x1) == 0,
                             },
                         );
+
+                        // zero out the page
+                        const memory: []u8 = @as([*]u8, @ptrFromInt(page))[0..0x1000];
+                        @memset(memory, 0);
                     }
 
                     // copy the segment data into the mapped memory
