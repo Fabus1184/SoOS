@@ -138,6 +138,11 @@ pub const IDT = struct {
                     \\
                     // push 4096 byte state
                     \\ subq $0x1000, %rsp
+                    // zero out the state
+                    \\ mov %rsp, %rdi
+                    \\ mov $0, %rsi
+                    \\ call memset
+                    // save extended state
                     \\ mov $~0, %eax
                     \\ mov $~0, %edx
                     \\ xsave 0(%rsp)

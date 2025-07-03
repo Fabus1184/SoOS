@@ -212,15 +212,17 @@ fn main() !void {
 
     std.log.debug("jumping to userspace (0x{x})", .{e.entry});
 
+    var userspaceStackFrame = idt.InterruptStackFrame{
+        .codeSegment = @bitCast(userCodeSegment),
+        .stackSegment = @bitCast(userDataSegment),
+        .rip = e.entry,
+        .rsp = userStackAddress + 0x40000,
+        .flags = 0x202,
+    };
+    var userspaceState = idt.State{};
     iretToUserspace(
-        &idt.InterruptStackFrame{
-            .codeSegment = @bitCast(userCodeSegment),
-            .stackSegment = @bitCast(userDataSegment),
-            .rip = e.entry,
-            .rsp = userStackAddress + 0x40000,
-            .flags = 0x202,
-        },
-        &idt.State{},
+        &userspaceStackFrame,
+        &userspaceState,
     );
 
     std.log.info("nothing more to do, bye!", .{});
@@ -231,9 +233,11 @@ fn main() !void {
 }
 
 fn iretToUserspace(
-    stackFrame: *const idt.InterruptStackFrame,
-    state: *const idt.State,
+    stackFrame: *idt.InterruptStackFrame,
+    state: *idt.State,
 ) noreturn {
+    @memset(&state.xsave, 0);
+
     asm volatile (
         \\ cli
         // push stack frame for iret
