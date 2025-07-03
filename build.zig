@@ -67,7 +67,7 @@ pub fn build(b: *std.Build) !void {
         "-cpu",
         "max",
         "-d",
-        "int,guest_errors",
+        "guest_errors",
         "-m",
         "8G",
         "-s",

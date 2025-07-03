@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const pic = @import("pic.zig");
 const Term = @import("term/term.zig").Term;
 const idt = @import("idt.zig");
 const GDT = @import("gdt.zig").GDT;
@@ -9,6 +10,7 @@ const limine = @import("limine.zig");
 const elf = @import("elf.zig");
 const cpuid = @import("cpuid.zig");
 const types = @import("types.zig");
+const serial = @import("serial.zig");
 
 extern const _START_KERNEL_MEMORY: *anyopaque;
 extern const _END_KERNEL_MEMORY: *anyopaque;
@@ -170,9 +172,28 @@ fn main() !void {
     IDT.setExceptionHandler(.pageFault, .ring0, pageFaultHandler, kernelCodeSegment);
     IDT.setInterruptHandler(.invalidOpcode, .ring0, invalidOpcodeHandler, kernelCodeSegment);
 
+    IDT.setIrqHandler(0x20 + 0, .ring0, irqHandler(0), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 1, .ring0, irqHandler(1), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 2, .ring0, irqHandler(2), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 3, .ring0, irqHandler(3), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 4, .ring0, irqHandler(4), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 5, .ring0, irqHandler(5), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 6, .ring0, irqHandler(6), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 7, .ring0, irqHandler(7), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 8, .ring0, irqHandler(8), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 9, .ring0, irqHandler(9), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 10, .ring0, irqHandler(10), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 11, .ring0, irqHandler(11), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 12, .ring0, irqHandler(12), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 13, .ring0, irqHandler(13), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 14, .ring0, irqHandler(14), kernelCodeSegment);
+    IDT.setIrqHandler(0x20 + 15, .ring0, irqHandler(15), kernelCodeSegment);
+
     IDT.setIrqHandler(0x80, .ring3, syscallHandler, kernelCodeSegment);
 
     IDT.load();
+
+    pic.init();
 
     @breakpoint();
 
@@ -195,6 +216,10 @@ fn main() !void {
     p.load();
 
     //var kernelAllocator = std.heap.FixedBufferAllocator.init(&_KERNEL_HEAP);
+
+    const serial0 = serial.SerialPort.serial0();
+    try serial0.init();
+    try std.fmt.format(serial0, "serial port intialized!\n", .{});
 
     var userspacePaging = p.clone();
     const e = try elf.Elf.load(@embedFile("userspace-build/x86_64-unknown-soos/debug/sosh"), &userspacePaging, frameAllocator);
@@ -220,7 +245,7 @@ fn main() !void {
         .flags = 0x202,
     };
     var userspaceState = idt.State{};
-    iretToUserspace(
+    iret(
         &userspaceStackFrame,
         &userspaceState,
     );
@@ -232,7 +257,7 @@ fn main() !void {
     }
 }
 
-fn iretToUserspace(
+fn iret(
     stackFrame: *idt.InterruptStackFrame,
     state: *idt.State,
 ) noreturn {
@@ -356,13 +381,17 @@ fn syscallHandler(
 
     switch (state.registers.rdi) {
         types.SYSCALL_WRITE => {
-            var args: types.syscall_write_t = undefined;
-            args = @as(*types.syscall_write_t, @ptrFromInt(state.registers.rsi)).*;
+            const args: *types.syscall_write_t = @ptrFromInt(state.registers.rsi);
 
             const ptr: [*]const u8 = @ptrCast(args.buf.?);
             const str: []const u8 = ptr[0..args.len];
 
             std.log.debug("syscall write {d}: '{s}'", .{ args.fd, str });
+
+            args.return_value = .{
+                .bytes_written = @intCast(str.len),
+                .@"error" = types.SYSCALL_WRITE_ERROR_NONE,
+            };
         },
         else => {
             std.log.err("unknown syscall: {d}", .{state.registers.rdi});
@@ -370,5 +399,49 @@ fn syscallHandler(
         },
     }
 
-    iretToUserspace(stackFrame, state);
+    iret(stackFrame, state);
+}
+
+pub fn irqHandler(comptime irq: u8) *const fn (
+    stackFrame: *idt.InterruptStackFrame,
+    state: *idt.State,
+) callconv(.c) noreturn {
+    return struct {
+        fn f(
+            stackFrame: *idt.InterruptStackFrame,
+            state: *idt.State,
+        ) callconv(.c) noreturn {
+            // Acknowledge the interrupt
+            pic.endOfInterrupt(irq);
+
+            switch (irq) {
+                // IRQ 4 (COM1)
+                4 => {
+                    const serial0 = serial.SerialPort.serial0();
+                    var buffer: [8]u8 = undefined;
+                    const count = serial0.readNonBlocking(&buffer);
+
+                    var i: usize = 0;
+                    while (i < count) {
+                        const len = std.unicode.utf8ByteSequenceLength(buffer[i]) catch |err| {
+                            std.log.err("invalid UTF-8 sequence at index {}: {}", .{ i, err });
+                            i += 1; // Skip invalid byte
+                            continue;
+                        };
+
+                        if (len == 1 and buffer[i] == '\r') {
+                            serial0.writeAll("\r\n") catch unreachable;
+                        } else {
+                            serial0.writeAll(buffer[i .. i + len]) catch unreachable;
+                        }
+
+                        i += len;
+                    }
+                },
+                else => {},
+            }
+
+            iret(stackFrame, state);
+        }
+    }.f;
 }

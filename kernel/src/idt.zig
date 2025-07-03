@@ -103,7 +103,7 @@ pub const IDT = struct {
         self: *IDT,
         irq: u8,
         ring: Ring,
-        comptime handler: ?*const fn (*InterruptStackFrame, *State) callconv(.c) void,
+        comptime handler: ?*const fn (*InterruptStackFrame, *State) callconv(.c) noreturn,
         segmentSelector: gdt.SegmentSelector,
     ) void {
         if (irq < 0x20 or irq > 0x100) {
@@ -134,15 +134,15 @@ pub const IDT = struct {
                     \\ pushq %rax
                     ::: "memory");
 
+                const xsavePtr = asm volatile (
+                    // push 4096 byte for xstate
+                        \\ subq $0x1000, %rsp
+                        : [_] "={rsp}" (-> *[4096]u8),
+                    );
+                @memset(xsavePtr, 0);
+
                 asm volatile (
-                    \\
-                    // push 4096 byte state
-                    \\ subq $0x1000, %rsp
-                    // zero out the state
-                    \\ mov %rsp, %rdi
-                    \\ mov $0, %rsi
-                    \\ call memset
-                    // save extended state
+                // save xstate
                     \\ mov $~0, %eax
                     \\ mov $~0, %edx
                     \\ xsave 0(%rsp)
