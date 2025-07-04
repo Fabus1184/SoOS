@@ -7,10 +7,11 @@ const GDT = @import("gdt.zig").GDT;
 const TSS = @import("tss.zig").TSS;
 const paging = @import("paging.zig");
 const limine = @import("limine.zig");
-const elf = @import("elf.zig");
 const cpuid = @import("cpuid.zig");
 const types = @import("types.zig");
 const serial = @import("serial.zig");
+const process = @import("process/process.zig");
+const Scheduler = @import("process/scheduler.zig").Scheduler;
 
 extern const _START_KERNEL_MEMORY: *anyopaque;
 extern const _END_KERNEL_MEMORY: *anyopaque;
@@ -18,7 +19,7 @@ extern const _END_KERNEL_MEMORY: *anyopaque;
 const _KERNEL_STACK_SIZE: usize = 0x1_000_000;
 var _KERNEL_STACK: [_KERNEL_STACK_SIZE]u8 align(16) = undefined;
 
-const _INTERRUPT_STACK_SIZE: usize = 0x100_000;
+const _INTERRUPT_STACK_SIZE: usize = 0x1_000_000;
 var _INTERRUPT_STACK: [_INTERRUPT_STACK_SIZE]u8 align(16) = undefined;
 
 const _KERNEL_HEAP_SIZE: usize = 0x10_000_000;
@@ -120,6 +121,14 @@ fn main() !void {
         @intFromPtr(&_KERNEL_STACK[0]),
         @intFromPtr(&_KERNEL_STACK[0]) + _KERNEL_STACK_SIZE,
     });
+    std.log.debug("interrupt stack is at 0x{x}..0x{x}", .{
+        @intFromPtr(&_INTERRUPT_STACK[0]),
+        @intFromPtr(&_INTERRUPT_STACK[0]) + _INTERRUPT_STACK_SIZE,
+    });
+    std.log.debug("kernel heap is at 0x{x}..0x{x}", .{
+        @intFromPtr(&_KERNEL_HEAP[0]),
+        @intFromPtr(&_KERNEL_HEAP[0]) + _KERNEL_HEAP_SIZE,
+    });
     std.log.debug("paging mode: {}", .{limine.LIMINE_PAGING_MODE_REQUEST.response.*.mode});
     std.debug.assert(limine.LIMINE_PAGING_MODE_REQUEST.response.*.mode == limine.raw.LIMINE_PAGING_MODE_X86_64_4LVL);
     std.log.debug("hhdm at 0x{x}", .{limine.LIMINE_HHDM_REQUEST.response.*.offset});
@@ -138,9 +147,6 @@ fn main() !void {
     const userCodeSegment = gdt.addSegment(.ring3, true);
     const userDataSegment = gdt.addSegment(.ring3, false);
     const tssSelector = gdt.addSystemSegment(&tss);
-    for (0..gdt.entries_count) |i| {
-        std.log.debug("gdt {d}: 0x{x}", .{ i, @as(u64, @bitCast(gdt.entries[i])) });
-    }
     std.log.debug("kcs: {x}, kds: {x}, ucs: {x}, uds: {x}, tss: {x}", .{
         @as(u16, @bitCast(kernelCodeSegment)),
         @as(u16, @bitCast(kernelDataSegment)),
@@ -199,12 +205,12 @@ fn main() !void {
 
     std.log.debug("returned after breakpoint handler", .{});
 
-    var p = paging.OffsetPageTable.fromCurrent(limine.LIMINE_HHDM_REQUEST.response.*.offset);
-    p.load();
+    KERNEL_PAGING = paging.OffsetPageTable.fromCurrent(limine.LIMINE_HHDM_REQUEST.response.*.offset);
+    KERNEL_PAGING.load();
 
-    const frameAllocator = paging.FRAME_ALLOCATOR.init(memmap, &p);
+    const frameAllocator = paging.FRAME_ALLOCATOR.init(memmap, &KERNEL_PAGING);
 
-    p.keep(&.{
+    KERNEL_PAGING.keep(&.{
         .{ limine.LIMINE_HHDM_REQUEST.response.*.offset, limine.LIMINE_HHDM_REQUEST.response.*.offset + 0x800000000 },
         .{ @intFromPtr(&_START_KERNEL_MEMORY), @intFromPtr(&_END_KERNEL_MEMORY) },
         .{
@@ -212,108 +218,65 @@ fn main() !void {
             @intFromPtr(framebuffer.*.address.?) + framebuffer.*.width * framebuffer.*.height * 4,
         },
     }, frameAllocator);
+    KERNEL_PAGING.load();
     std.log.debug("paging initialized", .{});
-    p.load();
-
-    //var kernelAllocator = std.heap.FixedBufferAllocator.init(&_KERNEL_HEAP);
 
     const serial0 = serial.SerialPort.serial0();
     try serial0.init();
     try std.fmt.format(serial0, "serial port intialized!\n", .{});
 
-    var userspacePaging = p.clone();
-    const e = try elf.Elf.load(@embedFile("userspace-build/x86_64-unknown-soos/debug/sosh"), &userspacePaging, frameAllocator);
-
-    const userStackAddress = 0x8000_0000_0000 - 0x40000; // 2MiB stack at the top of the address space
-    const frame = try frameAllocator.allocateFrame(.@"2MiB");
-    std.log.debug("user stack in frame 0x{x}", .{frame});
-    try userspacePaging.map(
+    SCHEDULER.init(KERNEL_ALLOCATOR.allocator());
+    try SCHEDULER.add(try process.Process.initKernel(
+        KERNEL_ALLOCATOR.allocator(),
+        &KERNEL_PAGING,
+        kernelCodeSegment,
+        kernelDataSegment,
+        @intFromPtr(&_KERNEL_STACK[0]) + _KERNEL_STACK_SIZE & ~@as(u64, 0xF),
+        kernelProcess,
+    ));
+    try SCHEDULER.add(try process.Process.initUser(
+        KERNEL_ALLOCATOR.allocator(),
+        @embedFile("userspace-build/x86_64-unknown-soos/debug/sosh"),
+        &KERNEL_PAGING,
         frameAllocator,
-        userStackAddress,
-        frame,
-        .@"2MiB",
-        .{ .writable = true, .userAccessible = true },
+        userCodeSegment,
+        userDataSegment,
+        "sosh",
+    ));
+
+    try SCHEDULER.schedule();
+}
+
+pub var KERNEL_PAGING: paging.OffsetPageTable = undefined;
+
+const KERNEL_PROCESS_STACK_SIZE: usize = 0x100_000;
+var _KERNEL_PROCESS_STACK: [KERNEL_PROCESS_STACK_SIZE]u8 align(16) = undefined;
+fn kernelProcess() callconv(.naked) noreturn {
+    asm volatile (
+        \\ call kernelWorker
     );
-
-    std.log.debug("jumping to userspace (0x{x})", .{e.entry});
-
-    var userspaceStackFrame = idt.InterruptStackFrame{
-        .codeSegment = @bitCast(userCodeSegment),
-        .stackSegment = @bitCast(userDataSegment),
-        .rip = e.entry,
-        .rsp = userStackAddress + 0x40000,
-        .flags = 0x202,
-    };
-    var userspaceState = idt.State{};
-    iret(
-        &userspaceStackFrame,
-        &userspaceState,
-    );
-
-    std.log.info("nothing more to do, bye!", .{});
-
+}
+export fn kernelWorker() noreturn {
     while (true) {
-        asm volatile ("hlt");
+        std.log.debug("kernel process running", .{});
+
+        for (SCHEDULER.processes.items) |*p| {
+            if (p.state == .syscall) {
+                p.handleSyscall();
+            }
+        }
+
+        // yield to the scheduler
+        asm volatile (
+            \\ int $0x80
+            :
+            : [_] "{rdi}" (types.SYSCALL_YIELD),
+        );
     }
 }
 
-fn iret(
-    stackFrame: *idt.InterruptStackFrame,
-    state: *idt.State,
-) noreturn {
-    @memset(&state.xsave, 0);
-
-    asm volatile (
-        \\ cli
-        // push stack frame for iret
-        // ss
-        \\ push 0x20(%[stackFrame])
-        // rsp
-        \\ push 0x18(%[stackFrame])
-        // flags
-        \\ push 0x10(%[stackFrame])
-        // cs
-        \\ push 0x8(%[stackFrame])
-        // rip
-        \\ push 0x0(%[stackFrame])
-        \\
-        // load ss in all other segment registers
-        \\ mov 0x20(%[stackFrame]), %ds
-        \\ mov 0x20(%[stackFrame]), %es
-        \\ mov 0x20(%[stackFrame]), %fs
-        \\ mov 0x20(%[stackFrame]), %gs
-        // xrstor xsave area
-        \\ mov $~0, %eax
-        \\ mov $~0, %edx
-        \\ xrstor 0(%[state])
-        // restore registers
-        \\ mov (0x1000 + ( 0 * 0x8))(%rbx), %rax
-        // skip rbx for now
-        // mov (0x1000 + ( 1 * 0x8))(%rbx), %rbx
-        \\ mov (0x1000 + ( 2 * 0x8))(%rbx), %rcx
-        \\ mov (0x1000 + ( 3 * 0x8))(%rbx), %rdx
-        \\ mov (0x1000 + ( 4 * 0x8))(%rbx), %rsi
-        \\ mov (0x1000 + ( 5 * 0x8))(%rbx), %rdi
-        \\ mov (0x1000 + ( 6 * 0x8))(%rbx), %rbp
-        \\ mov (0x1000 + ( 7 * 0x8))(%rbx), %r8
-        \\ mov (0x1000 + ( 8 * 0x8))(%rbx), %r9
-        \\ mov (0x1000 + ( 9 * 0x8))(%rbx), %r10
-        \\ mov (0x1000 + (10 * 0x8))(%rbx), %r11
-        \\ mov (0x1000 + (11 * 0x8))(%rbx), %r12
-        \\ mov (0x1000 + (12 * 0x8))(%rbx), %r13
-        \\ mov (0x1000 + (13 * 0x8))(%rbx), %r14
-        \\ mov (0x1000 + (14 * 0x8))(%rbx), %r15
-        // restore rbx
-        \\ mov (0x1000 + ( 1 * 0x8))(%rbx), %rbx
-        \\
-        \\ iretq
-        :
-        : [stackFrame] "{rax}" (stackFrame),
-          [state] "{rbx}" (state),
-        : "memory", "noreturn"
-    );
-    unreachable;
-}
+var KERNEL_ALLOCATOR = std.heap.FixedBufferAllocator.init(&_KERNEL_HEAP);
+var SCHEDULER: Scheduler = undefined;
 
 fn breakpointHandler(
     stackFrame: *idt.InterruptStackFrame,
@@ -337,6 +300,8 @@ fn pageFaultHandler(
     stackFrame: *idt.InterruptStackFrame,
     errorCode: u64,
 ) callconv(.{ .x86_64_interrupt = .{} }) noreturn {
+    KERNEL_PAGING.load();
+
     const Error = packed struct(u64) {
         pageNotPresent: bool,
         write: bool,
@@ -360,7 +325,16 @@ fn pageFaultHandler(
         @as(Error, @bitCast(errorCode)),
         address,
     });
-    @panic("page fault");
+
+    SCHEDULER.abort() catch |err| {
+        std.log.err("failed to abort scheduler: {}", .{err});
+        @panic("failed to abort scheduler");
+    };
+
+    SCHEDULER.schedule() catch |err| {
+        std.log.err("scheduler returned with an error: {}", .{err});
+        @panic("scheduler returned with an error");
+    };
 }
 
 fn invalidOpcodeHandler(
@@ -377,29 +351,26 @@ fn syscallHandler(
     stackFrame: *idt.InterruptStackFrame,
     state: *idt.State,
 ) callconv(.c) noreturn {
-    std.log.debug("syscall handler called with state {}, stackFrame {}", .{ state, stackFrame });
+    KERNEL_PAGING.load();
 
-    switch (state.registers.rdi) {
-        types.SYSCALL_WRITE => {
-            const args: *types.syscall_write_t = @ptrFromInt(state.registers.rsi);
+    std.log.debug("syscall handler called in process {s} with state {}, stackFrame {}", .{ SCHEDULER.currentProcess.?.name, state, stackFrame });
 
-            const ptr: [*]const u8 = @ptrCast(args.buf.?);
-            const str: []const u8 = ptr[0..args.len];
-
-            std.log.debug("syscall write {d}: '{s}'", .{ args.fd, str });
-
-            args.return_value = .{
-                .bytes_written = @intCast(str.len),
-                .@"error" = types.SYSCALL_WRITE_ERROR_NONE,
-            };
-        },
-        else => {
-            std.log.err("unknown syscall: {d}", .{state.registers.rdi});
-            @panic("unknown syscall");
-        },
+    if (state.registers.rdi == types.SYSCALL_YIELD) {
+        SCHEDULER.storeState(state, stackFrame, .ready) catch |err| {
+            std.log.err("failed to store state: {}", .{err});
+            @panic("failed to store state");
+        };
+    } else {
+        SCHEDULER.storeState(state, stackFrame, .syscall) catch |err| {
+            std.log.err("failed to store state: {}", .{err});
+            @panic("failed to store state");
+        };
     }
 
-    iret(stackFrame, state);
+    SCHEDULER.schedule() catch |err| {
+        std.log.err("scheduler returned with an error: {}", .{err});
+        @panic("scheduler returned with an error");
+    };
 }
 
 pub fn irqHandler(comptime irq: u8) *const fn (
@@ -441,7 +412,7 @@ pub fn irqHandler(comptime irq: u8) *const fn (
                 else => {},
             }
 
-            iret(stackFrame, state);
+            process.iret(stackFrame, state);
         }
     }.f;
 }

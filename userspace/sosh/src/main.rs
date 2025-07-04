@@ -1,23 +1,37 @@
-use ansi_term::{Color, Style};
+use std::io::Read;
+
+use anstyle::{AnsiColor, Color, Style};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
-        "{}",
-        Style::new()
-            .fg(Color::Cyan)
-            .paint("Welcome to sosh - the SoOS shell!")
+        "{}Welcome to sosh - the SoOS shell!{}",
+        Style::new().fg_color(Some(Color::Ansi(AnsiColor::Cyan))),
+        anstyle::Reset
     );
 
-    for i in 0.. {
+    let mut stdin = std::io::stdin();
+
+    loop {
         println!(
-            "{}",
-            Style::new().fg(Color::Green).paint(format!("sosh> {i}"))
+            "{}sosh>{} ",
+            Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green))),
+            anstyle::Reset,
         );
 
-        for _ in 0..10_000_000 {
-            unsafe { core::arch::asm!("nop") };
+        'read_loop: loop {
+            let mut buffer: Vec<u8> = vec![0; 64];
+            let count = stdin.read(&mut buffer)?;
+            for &byte in &buffer[..count] {
+                match byte {
+                    b'\n' => {
+                        println!("You entered a newline character.");
+                        break 'read_loop;
+                    }
+                    _ => {
+                        print!("{}", byte as char);
+                    }
+                }
+            }
         }
     }
-
-    Ok(())
 }

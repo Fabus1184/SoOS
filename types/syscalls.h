@@ -19,6 +19,7 @@ enum syscall_id_t {
     SYSCALL_MAP_FRAMEBUFFER = 11,
     SYSCALL_WRITE = 12,
     SYSCALL_WAITPID = 13,
+    SYSCALL_YIELD = 14,
 };
 
 struct syscall_print_t {
