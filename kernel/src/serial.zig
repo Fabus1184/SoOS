@@ -49,7 +49,10 @@ pub const SerialPort = struct {
     pub fn readNonBlocking(self: SerialPort, buffer: []u8) usize {
         var count: usize = 0;
         while ((self.ports[5].read() & 0x01) == 1) {
-            buffer[count] = self.ports[0].read();
+            buffer[count] = switch (self.ports[0].read()) {
+                '\r' => '\n', // Convert carriage return to newline
+                else => |byte| byte,
+            };
             count += 1;
 
             if (count == buffer.len) {

@@ -6,6 +6,7 @@ const idt = @import("../idt.zig");
 const gdt = @import("../gdt.zig");
 const types = @import("../types.zig");
 const kernel = @import("../kernel.zig");
+const serial = @import("../serial.zig");
 
 var NEXT_PID: u32 = 1;
 
@@ -26,7 +27,7 @@ pub const Process = struct {
 
     savedState: struct { idt.State, idt.InterruptStackFrame },
 
-    stdin: ?std.ArrayList(u8),
+    stdin: ?std.RingBuffer,
 
     pub fn initUser(
         allocator: std.mem.Allocator,
@@ -59,7 +60,7 @@ pub const Process = struct {
             .name = name,
             .paging = processPaging,
             .mappedPages = mappedPages,
-            .stdin = std.ArrayList(u8).init(allocator),
+            .stdin = try std.RingBuffer.init(allocator, 4096),
             .savedState = .{
                 idt.State{},
                 idt.InterruptStackFrame{
@@ -138,43 +139,91 @@ pub const Process = struct {
         kernel.KERNEL_PAGING.load();
         asm volatile ("sti");
     }
-    pub fn writeToProcess(self: *Process, comptime T: type, dest: *T, value: T) void {
+    pub fn copyToProcess(self: *Process, comptime T: type, dest: *T, value: T) void {
         asm volatile ("cli");
         self.paging.load();
         @as(*volatile T, dest).* = value;
         kernel.KERNEL_PAGING.load();
         asm volatile ("sti");
     }
+    pub fn copyToProcessSlice(
+        self: *Process,
+        comptime T: type,
+        dest: []T,
+        src: []const T,
+    ) void {
+        asm volatile ("cli");
+        self.paging.load();
+        std.mem.copyForwards(T, dest, src);
+        kernel.KERNEL_PAGING.load();
+        asm volatile ("sti");
+    }
 
-    pub fn handleSyscall(self: *Process) void {
-        std.log.debug("process {s} handling syscall: {}", .{ self.name, self.savedState[0].registers.rdi });
-
+    pub fn handleSyscall(self: *Process) !void {
         switch (self.savedState[0].registers.rdi) {
             types.SYSCALL_WRITE => {
                 const argsPtr: *types.syscall_write_t = @ptrFromInt(self.savedState[0].registers.rsi);
                 const args = self.copyFromProcess(types.syscall_write_t, argsPtr);
 
-                var buf: [4096]u8 = undefined;
-                if (args.len > buf.len) {
-                    std.log.err("write syscall called with too large buffer: {}", .{args.len});
-                    @panic("write syscall called with too large buffer");
-                }
+                // process write in chunks of 4096 bytes
+                var i: usize = 0;
+                while (i < args.len) : (i += 4096) {
+                    var buf: [4096]u8 = undefined;
 
-                const src: [*]const u8 = @ptrCast(args.buf);
-                self.copyFromProcessSlice(u8, src[0..args.len], buf[0..args.len]);
+                    const src: [*]const u8 = @ptrCast(args.buf);
+                    const len = @min(4096, args.len - i);
+
+                    self.copyFromProcessSlice(u8, src[i .. i + len], buf[0..len]);
+
+                    switch (args.fd) {
+                        1 => {
+                            try serial.SerialPort.serial0().writeAll(buf[0..len]);
+
+                            self.copyToProcess(types.syscall_write_return_t, &argsPtr.return_value, .{
+                                .bytes_written = @intCast(args.len),
+                                .@"error" = types.SYSCALL_WRITE_ERROR_NONE,
+                            });
+                        },
+                        else => {
+                            std.log.err("write syscall called with unknown fd: {}", .{args.fd});
+                            @panic("write syscall called with unknown fd");
+                        },
+                    }
+                }
+            },
+            types.SYSCALL_READ => {
+                const argsPtr: *types.syscall_read_t = @ptrFromInt(self.savedState[0].registers.rsi);
+                const args = self.copyFromProcess(types.syscall_read_t, argsPtr);
 
                 switch (args.fd) {
-                    1 => {
-                        std.log.info("write to stdout: {s}", .{buf[0..args.len]});
+                    0 => {
+                        asm volatile ("cli");
+                        if (self.stdin) |*stdin| {
+                            if (stdin.len() == 0) {
+                                return;
+                            }
 
-                        self.writeToProcess(types.syscall_write_return_t, &argsPtr.return_value, .{
-                            .bytes_written = @intCast(args.len),
-                            .@"error" = types.SYSCALL_WRITE_ERROR_NONE,
-                        });
+                            const len = @min(args.len, stdin.len());
+
+                            var src: [4096]u8 = undefined;
+                            try stdin.readFirst(&src, len);
+
+                            const dest: []u8 = @as([*]u8, @ptrCast(args.buf))[0..len];
+                            self.copyToProcessSlice(u8, dest, src[0..len]);
+
+                            self.copyToProcess(types.syscall_read_return_t, &argsPtr.return_value, .{
+                                .bytes_read = @intCast(len),
+                                .@"error" = types.SYSCALL_READ_ERROR_NONE,
+                            });
+                        } else {
+                            std.log.err("read syscall called without stdin", .{});
+                            @panic("read syscall called without stdin");
+                        }
+                        asm volatile ("sti");
                     },
                     else => {
-                        std.log.err("write syscall called with unknown fd: {}", .{args.fd});
-                        @panic("write syscall called with unknown fd");
+                        std.log.err("read syscall called with unknown fd: {}", .{args.fd});
+                        @panic("read syscall called with unknown fd");
                     },
                 }
             },

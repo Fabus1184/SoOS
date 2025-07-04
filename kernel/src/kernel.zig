@@ -258,11 +258,12 @@ fn kernelProcess() callconv(.naked) noreturn {
 }
 export fn kernelWorker() noreturn {
     while (true) {
-        std.log.debug("kernel process running", .{});
-
         for (SCHEDULER.processes.items) |*p| {
             if (p.state == .syscall) {
-                p.handleSyscall();
+                p.handleSyscall() catch |err| {
+                    std.log.err("process {s} failed to handle syscall: {}", .{ p.name, err });
+                    @panic("process failed to handle syscall");
+                };
             }
         }
 
@@ -353,8 +354,6 @@ fn syscallHandler(
 ) callconv(.c) noreturn {
     KERNEL_PAGING.load();
 
-    std.log.debug("syscall handler called in process {s} with state {}, stackFrame {}", .{ SCHEDULER.currentProcess.?.name, state, stackFrame });
-
     if (state.registers.rdi == types.SYSCALL_YIELD) {
         SCHEDULER.storeState(state, stackFrame, .ready) catch |err| {
             std.log.err("failed to store state: {}", .{err});
@@ -400,13 +399,26 @@ pub fn irqHandler(comptime irq: u8) *const fn (
                             continue;
                         };
 
-                        if (len == 1 and buffer[i] == '\r') {
-                            serial0.writeAll("\r\n") catch unreachable;
+                        if (len == 1) {
+                            switch (buffer[i]) {
+                                '\r' => serial0.writeAll("\r\n") catch unreachable,
+                                '\x08' => serial0.writeAll("\x08 \x08") catch unreachable,
+                                else => serial0.write(buffer[i]),
+                            }
                         } else {
                             serial0.writeAll(buffer[i .. i + len]) catch unreachable;
                         }
 
                         i += len;
+                    }
+
+                    for (SCHEDULER.processes.items) |*p| {
+                        if (p.stdin) |*stdin| {
+                            stdin.writeSlice(buffer[0..count]) catch |err| {
+                                std.log.err("failed to write to stdin: {}", .{err});
+                                @panic("failed to write to stdin");
+                            };
+                        }
                     }
                 },
                 else => {},

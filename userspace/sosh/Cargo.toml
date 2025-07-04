@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 anstyle = "1.0.11"
+anyhow = "1.0.98"
